@@ -8,14 +8,16 @@ dataset for forecasting.
 =========================================
 """
 
+import numpy as np
 import pandas as pd
 
 
 class FeatureFusion:
 
     def __init__(self):
-        print("Feature Fusion Module Initialized")
-        
+        pass
+
+
     def prepare_vision_features(self, vision_result):
 
         """
@@ -44,3 +46,125 @@ class FeatureFusion:
             numerical_df[column] = vision_df.iloc[0][column]
 
         return numerical_df
+
+    def trend_adjustment_factor(self, vision_features, max_adjustment=0.15):
+
+        """
+        Converts Gemini's free-text trend fields into a bounded
+        nudge on the physics persistence forecast: positive
+        when clouds are trending away, negative when they are
+        moving in, scaled down when the vision model itself
+        reports low confidence. Neutral text (or missing
+        fields) gives no adjustment.
+        """
+
+        trend_text = " ".join([
+            str(vision_features.get("irradiance_trend", "")),
+            str(vision_features.get("expected_generation_trend", ""))
+        ]).lower()
+
+        if "increas" in trend_text:
+            direction = 1
+        elif "decreas" in trend_text:
+            direction = -1
+        else:
+            direction = 0
+
+        try:
+            confidence = float(vision_features.get("confidence", 0.5))
+        except (TypeError, ValueError):
+            confidence = 0.5
+
+        confidence = min(max(confidence, 0.0), 1.0)
+
+        return direction * max_adjustment * confidence
+
+    # --------------------------------------------------
+
+    def _trend_direction(self, text):
+
+        text = str(text).lower()
+
+        if "increas" in text or "clear" in text:
+            return 1
+
+        if "decreas" in text or "cloud" in text:
+            return -1
+
+        return 0
+
+    # --------------------------------------------------
+
+    def trend_adjustment_profile(self,
+                                 vision_features,
+                                 horizon_minutes,
+                                 max_adjustment=0.15):
+
+        """
+        Per-block vision adjustment, replacing the old flat
+        scalar nudge. A cloud front arriving in 90 minutes
+        should not change the next 15-minute block - so the
+        adjustment:
+
+          - ramps in around the predicted arrival/clearing
+            time (`minutes_until_change`),
+          - uses the next-2h trend for near blocks and the
+            2-4h trend for far blocks,
+          - decays with horizon (a single video says little
+            about 5+ hours ahead),
+          - scales with the vision model's own confidence.
+
+        Falls back to the old flat behavior when the features
+        came from the v1 prompt (no timing fields), and to no
+        adjustment when features are missing entirely.
+        """
+
+        horizon_minutes = np.asarray(horizon_minutes, dtype=float)
+
+        if not vision_features:
+            return np.zeros_like(horizon_minutes)
+
+        # v1-format cache: no timing fields - flat fallback
+        if "trend_next_2h" not in vision_features:
+            return np.full_like(
+                horizon_minutes,
+                self.trend_adjustment_factor(vision_features, max_adjustment)
+            )
+
+        try:
+            confidence = float(vision_features.get("confidence", 0.5))
+        except (TypeError, ValueError):
+            confidence = 0.5
+
+        confidence = min(max(confidence, 0.0), 1.0)
+
+        near_direction = self._trend_direction(
+            vision_features.get("trend_next_2h", "")
+        )
+        far_direction = self._trend_direction(
+            vision_features.get("trend_2h_to_4h", "")
+        )
+
+        direction = np.where(
+            horizon_minutes <= 120,
+            near_direction,
+            far_direction
+        ).astype(float)
+
+        try:
+            minutes_until = float(vision_features.get("minutes_until_change"))
+        except (TypeError, ValueError):
+            minutes_until = 0.0
+
+        # 0 before the change arrives, ramping to full effect
+        # across the ~30 minutes around the predicted arrival
+        ramp = np.clip(
+            (horizon_minutes - minutes_until) / 30.0 + 1.0,
+            0.0,
+            1.0
+        )
+
+        # One video's information goes stale hours out
+        staleness = np.exp(-horizon_minutes / 240.0)
+
+        return direction * max_adjustment * confidence * ramp * staleness
