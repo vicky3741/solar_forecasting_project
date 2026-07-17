@@ -1,0 +1,6 @@
+pandas
+numpy
+PyYAML
+python-dotenv
+openpyxl
+loguru

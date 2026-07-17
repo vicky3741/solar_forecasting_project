@@ -1,0 +1,58 @@
+# ============================================================
+# Solar Forecasting Project
+# Global Configuration File
+# ============================================================
+
+project:
+  name: Solar Forecasting Project
+  version: 1.0.0
+
+plant:
+  name: Sirmour Solar Plant
+  latitude:
+  longitude:
+  capacity_mw:
+  timezone: Asia/Kolkata
+
+forecast:
+  interval_minutes: 15
+  forecast_end_time: "19:00"
+  output_frequency: 15
+
+vision:
+  provider: google
+  api_key: ""
+  model: gemini-3.5-flash
+
+  temperature: 0.2
+  max_output_tokens: 1024
+
+  frame_extraction:
+    target_frames: 10
+  
+  analysis:
+    timeout_seconds: 60
+
+
+forecast_model:
+  provider: chronos
+  model: amazon/chronos-base
+
+paths:
+  raw_data: data/raw
+  processed_data: data/processed
+  historical_data: data/historical
+  meter_data: data/meter
+  site_data: data/site
+  weather_data: data/weather
+  windy_data: data/windy
+
+outputs:
+  forecasts: outputs/forecasts
+  schedules: outputs/schedules
+  reports: outputs/reports
+  json: outputs/json
+
+logging:
+  level: INFO
+  log_directory: logs

@@ -1,0 +1,9 @@
+{
+    "video_name": "Tab-7-9-2026_14_10.webm",
+    "fps": 1000.0,
+    "duration_seconds": 21.74,
+    "total_frames": 21736,
+    "frames_extracted": 10,
+    "sampling_interval": 43,
+    "sampling_method": "uniform_sampling"
+}
