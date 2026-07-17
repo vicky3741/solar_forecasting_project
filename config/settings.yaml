@@ -9,9 +9,12 @@ project:
 
 plant:
   name: Sirmour Solar Plant
-  latitude:
-  longitude:
-  capacity_mw:
+  latitude: 24.56253056
+  longitude: 75.09140278
+  altitude_m: 0            # not provided in site details; default sea-level, minor effect on clear-sky airmass
+  capacity_mw: 5.1
+  tilt_deg: 24.56          # ASSUMPTION: not provided by site; set equal to latitude (common fixed-tilt heuristic) - update when actual value is known
+  azimuth_deg: 180         # ASSUMPTION: not provided by site; 180 = true south facing (standard for northern hemisphere) - update when actual value is known
   timezone: Asia/Kolkata
 
 forecast:
@@ -37,6 +40,10 @@ vision:
 forecast_model:
   provider: chronos
   model: amazon/chronos-base
+
+clearsky:
+  model: ineichen          # pvlib clear-sky model; free, no external data/API needed
+  performance_ratio: 0.78  # ASSUMPTION: typical utility-scale fixed-tilt PR; update once real PR is derived from clear-day meter data
 
 paths:
   raw_data: data/raw
