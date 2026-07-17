@@ -26,13 +26,34 @@ class JSONParser:
 
     # --------------------------------------------------
 
+    def extract_json_block(self, response):
+        """
+        Falls back to the outermost {...} block when the model
+        wraps the JSON in extra prose despite instructions.
+        """
+
+        start = response.find("{")
+        end = response.rfind("}")
+
+        if start == -1 or end == -1 or end <= start:
+            return response
+
+        return response[start:end + 1]
+
+    # --------------------------------------------------
+
     def parse(self, response):
 
         response = self.clean_response(response)
 
         try:
-
             return json.loads(response)
+
+        except json.JSONDecodeError:
+            pass
+
+        try:
+            return json.loads(self.extract_json_block(response))
 
         except json.JSONDecodeError as error:
 

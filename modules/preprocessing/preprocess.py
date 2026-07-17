@@ -10,6 +10,7 @@ import pandas as pd
 from modules.preprocessing.feature_engineering import FeatureEngineering
 from modules.preprocessing.validator import DataValidator
 from modules.preprocessing.time_alignment import TimeAlignment
+from modules.preprocessing.outlier_handler import OutlierHandler
 
 
 class DataPreprocessor:
@@ -19,8 +20,10 @@ class DataPreprocessor:
         self.validator = DataValidator()
 
         self.aligner = TimeAlignment()
-        
+
         self.feature_engineering = FeatureEngineering()
+
+        self.outlier_handler = OutlierHandler()
 
     # --------------------------------------------------
 
@@ -79,6 +82,8 @@ class DataPreprocessor:
         )
 
         dataframe = dataframe.drop_duplicates()
+
+        dataframe = self.outlier_handler.handle(dataframe)
 
         dataframe = dataframe.ffill().bfill()
 

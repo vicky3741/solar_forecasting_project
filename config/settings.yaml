@@ -21,6 +21,7 @@ forecast:
   interval_minutes: 15
   forecast_end_time: "19:00"
   output_frequency: 15
+  run_times: ["06:45", "08:15", "09:45", "11:15", "12:45", "14:15", "15:45"]
 
 vision:
   provider: google
@@ -28,7 +29,7 @@ vision:
   model: gemini-3.5-flash
 
   temperature: 0.2
-  max_output_tokens: 1024
+  max_output_tokens: 8192  # gemini-3.5-flash is a thinking model: internal reasoning consumes output tokens before the visible JSON, so a low cap truncates the response mid-JSON
 
   frame_extraction:
     target_frames: 10
@@ -39,11 +40,17 @@ vision:
 
 forecast_model:
   provider: chronos
-  model: amazon/chronos-base
+  model: amazon/chronos-bolt-small   # fast CPU-friendly zero-shot model; "amazon/chronos-base" was not a real HF model id
+  device: cpu
+
+hybrid_blend:
+  chronos_weight: 0.2      # TUNED via backtest across all 7 days x 7 official run-times (2026-07-18): grid search over [0.2,0.4,0.6,0.8] x performance_ratio [0.70-0.85] minimized average deviation. Re-tune as more days of data arrive - only 7 days were available here, so this can overfit to this week's weather.
+  min_context_points: 8    # below this many readings today, trust physics more heavily (handled in predictor.py)
+  trend_halflife_min: 0    # smart-persistence damping: recent kt slope saturates at slope*halflife; 0 disables the trend (flat persistence). TUNED 2026-07-18: the grid search found 0 (flat) beats 45/90/180 on this 7-day dataset - the capability stays in the code for re-testing when more data arrives.
 
 clearsky:
   model: ineichen          # pvlib clear-sky model; free, no external data/API needed
-  performance_ratio: 0.78  # ASSUMPTION: typical utility-scale fixed-tilt PR; update once real PR is derived from clear-day meter data
+  performance_ratio: 0.85  # TUNED via backtest (2026-07-18, see hybrid_blend.chronos_weight note) - was 0.78 as a generic assumption, backtest evidence across all 7 days favored 0.85. Re-tune as more days arrive.
 
 paths:
   raw_data: data/raw
@@ -53,6 +60,7 @@ paths:
   site_data: data/site
   weather_data: data/weather
   windy_data: data/windy
+  enercast_data: data/enercast
 
 outputs:
   forecasts: outputs/forecasts

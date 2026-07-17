@@ -5,3 +5,7 @@ python-dotenv
 openpyxl
 loguru
 pvlib
+chronos-forecasting
+schedule
+fastapi
+uvicorn

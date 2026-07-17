@@ -55,7 +55,11 @@ class GeminiClient:
 
         response = self.client.models.generate_content(
             model=self.model,
-            contents=contents
+            contents=contents,
+            config=types.GenerateContentConfig(
+                temperature=settings["vision"]["temperature"],
+                max_output_tokens=settings["vision"]["max_output_tokens"]
+            )
         )
 
         return response.text
