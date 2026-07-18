@@ -13,6 +13,12 @@ a small JSON API:
   GET /api/history           - the multi-day backtest
                                 comparison (our forecast vs
                                 Enercast vs actual)
+  GET /api/comparison        - per-15-min-block detail for
+                                every backtested run (our kW
+                                vs Enercast kW vs actual kW)
+
+Run directly with:  python app.py
+Then open:          http://localhost:8000
 
 Both endpoints read from files already produced by the
 orchestrator/backtester rather than recomputing anything
@@ -106,3 +112,10 @@ def get_comparison():
         )
 
     return records_with_nulls(detail)
+
+
+if __name__ == "__main__":
+
+    import uvicorn
+
+    uvicorn.run(app, host="127.0.0.1", port=8000)
