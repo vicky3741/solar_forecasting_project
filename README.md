@@ -52,8 +52,13 @@ a tiny LightGBM model trained on the backtest record of our own past
 mistakes (features: block hour, horizon, kt at run time, forecast value —
 all known at prediction time). Validated leave-one-day-out before
 shipping: +1.14 pct points improvement on unseen days (10/13 days
-helped). Retrain by rerunning `tests/test_residual_experiment.py`
-whenever new days of data arrive.
+helped). A stricter walk-forward test (each day corrected only by
+past days — `tests/test_walkforward_experiment.py`) showed the
+correction *hurts* until ~7-8 days of mistake history exist, then
+delivers +1.2 pct points — so the corrector must only be trusted
+once trained on at least a week of data (the shipped model is
+trained on 13 days). Retrain by rerunning
+`tests/test_residual_experiment.py` whenever new days arrive.
 
 ## Project structure
 
