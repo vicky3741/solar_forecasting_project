@@ -191,10 +191,13 @@ def main():
 
         model_path = corrector.train_and_save(
             detail[features],
-            detail["residual_kw"]
+            detail["residual_kw"],
+            training_days=detail["date"].nunique()
         )
 
         print(f"Production model trained on all days and saved: {model_path}")
+        print(f"Training days recorded: {detail['date'].nunique()} "
+              f"(corrector activates at >= {corrector.min_training_days})")
 
 
 if __name__ == "__main__":

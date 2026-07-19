@@ -12,12 +12,20 @@ deviation by +1.14 percentage points, helping 10/13 days
 (see tests/test_residual_experiment.py, which also trains
 and saves the production model).
 
+A walk-forward test (tests/test_walkforward_experiment.py)
+additionally showed corrections trained on fewer than ~8
+days make forecasts WORSE - so the corrector refuses to
+run until its trained model has at least
+`min_training_days` of history behind it (recorded in a
+metadata file saved next to the model).
+
 Features are strictly things known at prediction time:
 block hour, forecast horizon, kt at run time, and our own
 forecast value. No future information.
 =========================================================
 """
 
+import json
 from pathlib import Path
 
 import numpy as np
@@ -58,6 +66,8 @@ class ResidualCorrector:
             correction_settings.get("model_path", "models/residual_lgbm.txt")
         )
 
+        self.min_training_days = correction_settings.get("min_training_days", 8)
+
         self.capacity_kw = settings["plant"]["capacity_mw"] * 1000
 
         self._model = None
@@ -65,9 +75,43 @@ class ResidualCorrector:
     # --------------------------------------------------
 
     @property
-    def available(self):
+    def meta_path(self):
 
-        return self.enabled and self.model_path.exists()
+        return self.model_path.with_suffix(".meta.json")
+
+    # --------------------------------------------------
+
+    def get_training_days(self):
+        """
+        How many days of history the saved model was trained
+        on, from the metadata written at training time.
+        Returns 0 when no metadata exists (old/unknown model).
+        """
+
+        if not self.meta_path.exists():
+            return 0
+
+        with open(self.meta_path, "r", encoding="utf-8") as file:
+            meta = json.load(file)
+
+        return int(meta.get("training_days", 0))
+
+    # --------------------------------------------------
+
+    @property
+    def available(self):
+        """
+        The corrector only runs when enabled, a model exists,
+        AND that model was trained on enough days - the
+        walk-forward experiment showed under-trained
+        corrections actively hurt.
+        """
+
+        return (
+            self.enabled
+            and self.model_path.exists()
+            and self.get_training_days() >= self.min_training_days
+        )
 
     # --------------------------------------------------
 
@@ -127,12 +171,14 @@ class ResidualCorrector:
 
     # --------------------------------------------------
 
-    def train_and_save(self, feature_frame, residuals):
+    def train_and_save(self, feature_frame, residuals, training_days):
         """
         Trains on the full available history and saves the
-        production model. Called by the experiment script
-        after (and only after) the leave-one-day-out
-        validation verdict is positive.
+        production model plus its metadata (how many days it
+        was trained on - the `available` gate reads this).
+        Called by the experiment script after (and only
+        after) the leave-one-day-out validation verdict is
+        positive.
         """
 
         train_set = lgb.Dataset(feature_frame[FEATURES], label=residuals)
@@ -142,5 +188,15 @@ class ResidualCorrector:
         self.model_path.parent.mkdir(parents=True, exist_ok=True)
 
         model.save_model(str(self.model_path))
+
+        with open(self.meta_path, "w", encoding="utf-8") as file:
+            json.dump(
+                {
+                    "training_days": int(training_days),
+                    "trained_at": pd.Timestamp.now().isoformat()
+                },
+                file,
+                indent=4
+            )
 
         return self.model_path

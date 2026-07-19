@@ -51,6 +51,7 @@ hybrid_blend:
 residual_correction:
   enabled: true
   model_path: models/residual_lgbm.txt  # trained by tests/test_residual_experiment.py; VALIDATED 2026-07-19 leave-one-day-out on 13 days: +1.14 pct points on unseen days, helped 10/13. Retrain (rerun that script) whenever new days of data arrive.
+  min_training_days: 8   # EVIDENCE-BASED (walk-forward test 2026-07-19): corrections trained on <8 days made forecasts WORSE (-0.97 avg); 8+ days gave +1.2. The corrector stays silently off until the trained model has at least this many days behind it.
 
 clearsky:
   model: ineichen          # pvlib clear-sky model; free, no external data/API needed
