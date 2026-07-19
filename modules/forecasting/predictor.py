@@ -400,7 +400,20 @@ class HybridPredictor:
                 signals["horizon_minutes"]
             )
 
-        return self.blend_signals(
+        forecast = self.blend_signals(
             signals,
             vision_adjustment=vision_adjustment
         )
+
+        from modules.forecasting.residual_correction import ResidualCorrector
+
+        corrector = ResidualCorrector()
+
+        if corrector.available:
+            forecast = corrector.apply(
+                forecast,
+                run_time,
+                signals["kt_now"]
+            )
+
+        return forecast

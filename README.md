@@ -47,7 +47,13 @@ Plant location ─────► pvlib clear-sky physics ───────�
    model input.
 
 The final forecast per block = blended kt × clear-sky generation curve,
-clipped to plant capacity.
+clipped to plant capacity — then passed through a **residual correction**:
+a tiny LightGBM model trained on the backtest record of our own past
+mistakes (features: block hour, horizon, kt at run time, forecast value —
+all known at prediction time). Validated leave-one-day-out before
+shipping: +1.14 pct points improvement on unseen days (10/13 days
+helped). Retrain by rerunning `tests/test_residual_experiment.py`
+whenever new days of data arrive.
 
 ## Project structure
 
@@ -62,10 +68,13 @@ modules/
   preprocessing/   Validation, outlier clipping, 15-min alignment, features
   vision/          Frame extraction -> Gemini -> JSON parsing (cached per video)
   fusion/          Vision features -> per-block forecast adjustment profile
-  forecasting/     clearsky.py (pvlib), chronos_model.py, predictor.py (hybrid)
+  forecasting/     clearsky.py (pvlib), chronos_model.py, predictor.py (hybrid),
+                   residual_correction.py (LightGBM error-learning)
   evaluation/      metrics.py, evaluator.py, backtester.py (+ tuning grid)
   orchestrator/    pipeline.py - one full forecast run end to end
   scheduler/       Auto-triggers the orchestrator at the 7 daily run times
+models/            Trained residual-correction model (regenerate via
+                   tests/test_residual_experiment.py)
 utils/             Logger (loguru) + file I/O helpers
 tests/             Runnable smoke tests / backtest for every module
 static/            Dashboard frontend (Chart.js)

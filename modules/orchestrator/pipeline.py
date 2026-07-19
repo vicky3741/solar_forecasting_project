@@ -32,6 +32,7 @@ import pandas as pd
 from config.config import settings
 from modules.preprocessing.preprocess import DataPreprocessor
 from modules.forecasting.predictor import HybridPredictor
+from modules.forecasting.residual_correction import ResidualCorrector
 from modules.evaluation.evaluator import Evaluator
 from modules.vision.vision_module import VisionModule
 from modules.fusion.fusion import FeatureFusion
@@ -47,6 +48,7 @@ class Orchestrator:
 
         self.preprocessor = DataPreprocessor()
         self.predictor = HybridPredictor()
+        self.corrector = ResidualCorrector()
         self.evaluator = Evaluator()
         self.vision = VisionModule()
         self.fusion = FeatureFusion()
@@ -216,6 +218,14 @@ class Orchestrator:
             signals,
             vision_adjustment=vision_adjustment
         )
+
+        if self.corrector.available:
+            forecast = self.corrector.apply(
+                forecast,
+                run_time,
+                signals["kt_now"]
+            )
+            self.logger.info("Residual correction applied")
 
         run_label = run_time.strftime("%Y-%m-%d_%H-%M")
 

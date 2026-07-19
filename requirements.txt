@@ -9,3 +9,4 @@ chronos-forecasting
 schedule
 fastapi
 uvicorn
+lightgbm
