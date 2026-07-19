@@ -125,18 +125,23 @@ automatically at the 7 official times: 06:45, 08:15, 09:45, 11:15, 12:45,
 
 ## Current results (honest)
 
-Backtested point-in-time (no lookahead) across 7 days × 7 run-times:
+Backtested point-in-time (no lookahead) across 13 days (Jul 6–18) × 7
+run-times = 91 runs:
 
 | Metric (avg over comparable runs) | Ours | Enercast |
 |---|---|---|
-| Deviation (% of capacity) | 10.13% | 8.55% |
-| Runs won | 11 / 35 | 24 / 35 |
+| Deviation (% of capacity) | 8.6% | 6.7% |
+| Runs won | 24 / 84 | 60 / 84 |
+
+Out-of-sample check: parameters tuned on week 1 (Jul 6–12) were tested
+on unseen week 2 (Jul 13–18) and performed *better* there (7.8% vs
+10.0% deviation) — the model generalizes rather than memorizing.
 
 Known limitations, stated plainly:
 
-- **Only 7 days of history** — all tuned parameters (chronos_weight 0.2,
-  performance_ratio 0.85) must be re-validated as more data arrives.
-- **Windy videos exist for only 1 of 7 days** (July 9). On vision-assisted
+- **13 days of history** — tuned parameters (chronos_weight 0.2,
+  performance_ratio 0.80) keep being re-validated as more data arrives.
+- **Windy videos exist for only 1 of 13 days** (July 9). On vision-assisted
   runs the deviation improved from 5.16% → 4.82%. Daily video capture at
   every run time is the highest-value data improvement available.
 - **The scheduling-penalty metric is a placeholder** (flat rate beyond a
