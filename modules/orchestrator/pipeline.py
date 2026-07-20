@@ -17,11 +17,13 @@ asks for:
   - An end-of-day validation file, once the last official
     run time of the day has passed
 
-NOTE: "latest available data" here means whatever is on
-disk in data/historical and data/windy/videos. There is no
-live meter/video feed wired up yet - that is a separate,
-not-yet-built integration. Running this against yesterday's
-static files does not simulate a live plant.
+Live data feed: when storage.auto_pull is on, the run first
+pulls the latest meter data from the team S3 bucket into
+data/historical; when storage.auto_push is on, it pushes the
+forecast and Current Final Schedule back to the bucket after.
+Both degrade gracefully - if the cloud is unreachable the run
+continues on whatever local data exists, so a network hiccup
+never blocks a forecast.
 =========================================================
 """
 
@@ -36,6 +38,7 @@ from modules.forecasting.residual_correction import ResidualCorrector
 from modules.evaluation.evaluator import Evaluator
 from modules.vision.vision_module import VisionModule
 from modules.fusion.fusion import FeatureFusion
+from modules.storage.s3_client import S3Storage
 from utils import file_manager
 from utils.logger import get_logger
 
@@ -52,6 +55,11 @@ class Orchestrator:
         self.evaluator = Evaluator()
         self.vision = VisionModule()
         self.fusion = FeatureFusion()
+        self.storage = S3Storage()
+
+        store = settings.get("storage", {})
+        self.auto_pull = store.get("enabled", False) and store.get("auto_pull", False)
+        self.auto_push = store.get("enabled", False) and store.get("auto_push", False)
 
         self.historical_folder = Path(settings["paths"]["historical_data"])
         self.windy_folder = Path(settings["paths"]["windy_data"]) / "videos"
@@ -62,6 +70,57 @@ class Orchestrator:
         self.reports_folder = Path(settings["outputs"]["reports"])
 
         self.official_run_times = settings["forecast"]["run_times"]
+
+    # --------------------------------------------------
+
+    def pull_latest_from_cloud(self):
+        """
+        Pulls the latest meter data from the team S3 bucket
+        into data/historical before forecasting. Never raises
+        - a cloud/network failure just leaves the local data
+        as-is and logs a warning, so the forecast still runs.
+        """
+
+        if not self.auto_pull:
+            return
+
+        try:
+            synced = self.storage.sync_meter_data(self.historical_folder)
+
+            if synced:
+                self.logger.info(
+                    f"Pulled {len(synced)} new/updated meter file(s) from S3"
+                )
+            else:
+                self.logger.info("S3 meter data already up to date")
+
+        except Exception as error:
+            self.logger.warning(
+                f"S3 pull skipped ({error}) - continuing on local data"
+            )
+
+    # --------------------------------------------------
+
+    def push_outputs_to_cloud(self, run_label, forecast_path, schedule_path):
+        """
+        Pushes this run's forecast and the Current Final
+        Schedule back to the team S3 bucket. Never raises - a
+        push failure is logged but does not fail the run,
+        since the outputs are already saved locally.
+        """
+
+        if not self.auto_push:
+            return
+
+        try:
+            self.storage.push_output(forecast_path, "forecasts", f"{run_label}.csv")
+            self.storage.push_output(schedule_path, "current_final_schedule.csv")
+            self.logger.info("Pushed forecast + Current Final Schedule to S3")
+
+        except Exception as error:
+            self.logger.warning(
+                f"S3 push skipped ({error}) - outputs are still saved locally"
+            )
 
     # --------------------------------------------------
 
@@ -203,6 +262,8 @@ class Orchestrator:
 
         self.logger.info(f"Starting forecast run for {run_time}")
 
+        self.pull_latest_from_cloud()
+
         dataframe = self.load_data()
 
         vision_features = self.get_vision_features(run_time)
@@ -239,14 +300,14 @@ class Orchestrator:
             self.forecasts_folder / "archive.csv"
         )
 
+        schedule_path = self.schedules_folder / "current_final_schedule.csv"
         schedule = self.build_current_schedule(dataframe, forecast, run_time)
-        file_manager.save_dataframe(
-            schedule,
-            self.schedules_folder / "current_final_schedule.csv"
-        )
+        file_manager.save_dataframe(schedule, schedule_path)
 
         if self.is_last_official_run(run_time):
             self.save_end_of_day_validation(dataframe, run_time)
+
+        self.push_outputs_to_cloud(run_label, forecast_path, schedule_path)
 
         self.logger.info(f"Forecast run complete for {run_time}")
 

@@ -84,14 +84,29 @@ class S3Storage:
         Returns the keys of every object under `prefix`.
         """
 
-        keys = []
+        return [obj["Key"] for obj in self.list_objects_meta(prefix)]
+
+    # --------------------------------------------------
+
+    def list_objects_meta(self, prefix=""):
+        """
+        Like list_objects but returns each object's key, size
+        and last-modified time - needed to dedupe and skip
+        redundant downloads during a sync.
+        """
+
+        objects = []
         paginator = self.client.get_paginator("list_objects_v2")
 
         for page in paginator.paginate(Bucket=self.bucket, Prefix=prefix):
             for obj in page.get("Contents", []):
-                keys.append(obj["Key"])
+                objects.append({
+                    "Key": obj["Key"],
+                    "Size": obj["Size"],
+                    "LastModified": obj["LastModified"]
+                })
 
-        return keys
+        return objects
 
     # --------------------------------------------------
 
@@ -164,3 +179,66 @@ class S3Storage:
             downloaded.append(path)
 
         return downloaded
+
+    # --------------------------------------------------
+
+    def sync_meter_data(self, local_folder, min_size_bytes=100):
+        """
+        Merges the bucket's meter CSVs into `local_folder`.
+
+        The same meter file can appear under several date
+        folders in the bucket (Team 3 re-dumps batches), so
+        files are keyed by their real filename (which encodes
+        the data date) and the most recently modified copy
+        wins. Placeholder/empty files below min_size_bytes are
+        skipped, and a file whose local copy already matches
+        the bucket size is not re-downloaded. Existing local
+        files for dates the bucket does not have are left
+        untouched (merge, never delete).
+        """
+
+        local_folder = Path(local_folder)
+        local_folder.mkdir(parents=True, exist_ok=True)
+
+        # filename -> (last_modified, key, size), newest kept
+        best = {}
+
+        for obj in self.list_objects_meta(self.site_prefix):
+
+            key = obj["Key"]
+
+            if "/Metered_Data/" not in key or not key.endswith(".csv"):
+                continue
+
+            if obj["Size"] < min_size_bytes:
+                continue
+
+            filename = key.split("/")[-1]
+
+            if filename not in best or obj["LastModified"] > best[filename][0]:
+                best[filename] = (obj["LastModified"], key, obj["Size"])
+
+        synced = []
+
+        for filename, (_, key, size) in best.items():
+
+            local_path = local_folder / filename
+
+            if local_path.exists() and local_path.stat().st_size == size:
+                continue  # already up to date
+
+            self.download(key, local_path)
+            synced.append(local_path)
+
+        return synced
+
+    # --------------------------------------------------
+
+    def push_output(self, local_path, *key_parts):
+        """
+        Uploads a local file to this team's output area in the
+        bucket, e.g. push_output(path, "forecasts", "run.csv")
+        -> outputs/team2/SIRMOUR/forecasts/run.csv
+        """
+
+        return self.upload(local_path, self.output_key(*key_parts))

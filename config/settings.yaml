@@ -86,6 +86,8 @@ storage:
   site_prefix: inputs/MadhyaPradesh/SIRMOUR
   # Where this team writes its own forecast outputs back to the bucket
   output_prefix: outputs/team2/SIRMOUR
+  auto_pull: true    # orchestrator pulls the latest meter data from S3 before forecasting
+  auto_push: true    # orchestrator pushes the forecast + current schedule back to S3 after
 
 logging:
   level: INFO
