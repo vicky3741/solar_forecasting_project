@@ -73,6 +73,20 @@ outputs:
   reports: outputs/reports
   json: outputs/json
 
+# Team-shared AWS S3 cloud storage (set up by Team 3). Only the
+# bucket/region/paths (non-secret) live here; the access keys are
+# read from .env (AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY) and are
+# never committed.
+storage:
+  enabled: true
+  provider: s3
+  bucket: windy-video-storage-team03-813676682978-ap-south-1-an
+  region: ap-south-1
+  # Team 3's data-lake layout: inputs/<state>/<site>/<date>/<DataType>/
+  site_prefix: inputs/MadhyaPradesh/SIRMOUR
+  # Where this team writes its own forecast outputs back to the bucket
+  output_prefix: outputs/team2/SIRMOUR
+
 logging:
   level: INFO
   log_directory: logs

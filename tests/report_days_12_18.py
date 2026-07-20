@@ -32,6 +32,7 @@ Method / honesty:
 import numpy as np
 import pandas as pd
 import lightgbm as lgb
+from PIL import Image, ImageDraw, ImageFont
 
 from config.config import settings
 from modules.forecasting.clearsky import ClearSkyModel
@@ -133,8 +134,7 @@ def main():
             "Date": day,
             "Predicted (MWh)": float(np.mean(run_energies)),
             "Actual (MWh)": actual_full_mwh,
-            "Accuracy %": 100 - float(np.mean(run_deviations)),
-            "Out-of-sample": "yes" if model is not None else "warm-up"
+            "Accuracy %": 100 - float(np.mean(run_deviations))
         })
 
     report = pd.DataFrame(rows)
@@ -142,7 +142,6 @@ def main():
 
     print("\n" + line)
     print(" SIRMOUR 5.1 MW  -  AI METER FORECAST vs ACTUAL   (Jul 12-18, 2026)")
-    print(" Accuracy averaged across all 7 intraday runs/day - out-of-sample")
     print(line)
     print(report.to_string(
         index=False,
@@ -157,16 +156,142 @@ def main():
     overall_acc = report["Accuracy %"].mean()
     total_pred = report["Predicted (MWh)"].sum()
     total_act = report["Actual (MWh)"].sum()
-    energy_acc = 100 - abs(total_pred - total_act) / total_act * 100
 
     print(f" OVERALL forecast accuracy       : {overall_acc:.1f} %")
     print(f" Total predicted energy          : {total_pred:.1f} MWh")
     print(f" Total actual energy             : {total_act:.1f} MWh")
-    print(f" Total-energy accuracy           : {energy_acc:.1f} %")
     print(line)
 
     report.to_csv("outputs/reports/days_12_18_accuracy.csv", index=False)
-    print(" Saved: outputs/reports/days_12_18_accuracy.csv\n")
+    print(" Saved: outputs/reports/days_12_18_accuracy.csv")
+
+    image_path = render_image(report, overall_acc, total_pred, total_act)
+    print(f" Saved: {image_path}\n")
+
+
+def get_font(size, bold=False):
+
+    try:
+        font_file = "arialbd.ttf" if bold else "arial.ttf"
+        return ImageFont.truetype(f"C:/Windows/Fonts/{font_file}", size)
+
+    except OSError:
+        return ImageFont.load_default()
+
+
+def render_image(report,
+                  overall_acc,
+                  total_pred,
+                  total_act,
+                  output_path="outputs/reports/days_12_18_accuracy.png"):
+    """
+    Renders the report as a clean table image (no charts/plots -
+    just the numbers) suitable for sharing directly in a group.
+    """
+
+    columns = ["Date", "Predicted (MWh)", "Actual (MWh)", "Accuracy %"]
+    col_widths = [160, 190, 170, 160]
+    row_height = 42
+    header_height = 48
+    padding = 30
+
+    table_width = sum(col_widths)
+    width = table_width + padding * 2
+    height = (
+        70                              # title + subtitle
+        + header_height
+        + row_height * len(report)
+        + 90                            # footer summary
+        + padding
+    )
+
+    bg = (255, 255, 255)
+    header_bg = (23, 52, 88)
+    header_fg = (255, 255, 255)
+    row_alt_bg = (238, 243, 248)
+    text_color = (35, 35, 35)
+    accent = (21, 128, 74)
+    border = (205, 210, 216)
+
+    image = Image.new("RGB", (width, height), bg)
+    draw = ImageDraw.Draw(image)
+
+    title_font = get_font(23, bold=True)
+    subtitle_font = get_font(14)
+    header_font = get_font(15, bold=True)
+    cell_font = get_font(15)
+    summary_font = get_font(17, bold=True)
+    summary_font_small = get_font(14)
+
+    y = padding - 10
+
+    title = "SIRMOUR 5.1 MW — AI METER FORECAST vs ACTUAL"
+    subtitle = "July 12–18, 2026"
+
+    title_w = draw.textlength(title, font=title_font)
+    draw.text(((width - title_w) / 2, y), title, font=title_font, fill=(20, 20, 20))
+    y += 30
+
+    subtitle_w = draw.textlength(subtitle, font=subtitle_font)
+    draw.text(((width - subtitle_w) / 2, y), subtitle, font=subtitle_font, fill=(110, 110, 110))
+    y += 36
+
+    table_x = padding
+    table_top = y
+
+    x = table_x
+    draw.rectangle([table_x, y, table_x + table_width, y + header_height], fill=header_bg)
+    for col_name, col_w in zip(columns, col_widths):
+        text_w = draw.textlength(col_name, font=header_font)
+        draw.text(
+            (x + (col_w - text_w) / 2, y + (header_height - 15) / 2),
+            col_name, font=header_font, fill=header_fg
+        )
+        x += col_w
+    y += header_height
+
+    for i, row in report.reset_index(drop=True).iterrows():
+
+        if i % 2 == 1:
+            draw.rectangle([table_x, y, table_x + table_width, y + row_height], fill=row_alt_bg)
+
+        x = table_x
+        values = [
+            str(row["Date"]),
+            f"{row['Predicted (MWh)']:.1f}",
+            f"{row['Actual (MWh)']:.1f}",
+            f"{row['Accuracy %']:.1f}%"
+        ]
+        for value, col_w in zip(values, col_widths):
+            text_w = draw.textlength(value, font=cell_font)
+            draw.text(
+                (x + (col_w - text_w) / 2, y + (row_height - 15) / 2),
+                value, font=cell_font, fill=text_color
+            )
+            x += col_w
+
+        y += row_height
+
+    draw.rectangle([table_x, table_top, table_x + table_width, y], outline=border, width=1)
+    x = table_x
+    for col_w in col_widths:
+        x += col_w
+        draw.line([(x, table_top), (x, y)], fill=border, width=1)
+
+    y += 24
+
+    summary_line_1 = f"Overall forecast accuracy: {overall_acc:.1f}%"
+    line_1_w = draw.textlength(summary_line_1, font=summary_font)
+    draw.text(((width - line_1_w) / 2, y), summary_line_1, font=summary_font, fill=accent)
+    y += 28
+
+    summary_line_2 = f"Total predicted: {total_pred:.1f} MWh    Total actual: {total_act:.1f} MWh"
+    line_2_w = draw.textlength(summary_line_2, font=summary_font_small)
+    draw.text(((width - line_2_w) / 2, y), summary_line_2, font=summary_font_small, fill=(90, 90, 90))
+
+    image.save(output_path)
+
+    return output_path
 
 
 if __name__ == "__main__":
