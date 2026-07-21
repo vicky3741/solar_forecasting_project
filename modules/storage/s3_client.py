@@ -21,6 +21,8 @@ This team writes its forecast outputs back under
 =========================================================
 """
 
+import re
+from datetime import datetime
 from pathlib import Path
 
 import boto3
@@ -28,6 +30,13 @@ from botocore.exceptions import BotoCoreError, ClientError, NoCredentialsError
 
 from config.config import settings
 from utils.logger import get_logger
+
+
+# Windy video filenames: sirmour_YYMMDD_HH_MM.<ext>
+# e.g. sirmour_260721_12_57.mp4 -> 2026-07-21 12:57
+_VIDEO_TIME_PATTERN = re.compile(r"sirmour_(\d{2})(\d{2})(\d{2})_(\d{2})_(\d{2})")
+
+_VIDEO_EXTENSIONS = (".mp4", ".webm")
 
 
 class S3Storage:
@@ -42,6 +51,8 @@ class S3Storage:
         self.bucket = store.get("bucket")
         self.region = store.get("region")
         self.site_prefix = store.get("site_prefix", "").rstrip("/")
+        self.video_prefix = store.get("video_prefix", "").rstrip("/")
+        self.video_cache = store.get("video_cache", "data/windy/s3_cache")
         self.output_prefix = store.get("output_prefix", "").rstrip("/")
 
         self._client = None
@@ -242,3 +253,85 @@ class S3Storage:
         """
 
         return self.upload(local_path, self.output_key(*key_parts))
+
+    # --------------------------------------------------
+
+    @staticmethod
+    def parse_video_time(key):
+        """
+        Recording datetime encoded in a Windy video filename,
+        or None if it does not match the expected pattern.
+        """
+
+        match = _VIDEO_TIME_PATTERN.search(key)
+
+        if not match:
+            return None
+
+        yy, mm, dd, hh, minute = map(int, match.groups())
+
+        try:
+            return datetime(2000 + yy, mm, dd, hh, minute)
+        except ValueError:
+            return None
+
+    # --------------------------------------------------
+
+    def latest_video_before(self, run_time):
+        """
+        Key of the most recent Windy video recorded on the
+        same calendar day at or before run_time - the single
+        freshest same-day video, matching the forecast's
+        "one latest same-day video" rule. Returns None when no
+        qualifying video exists.
+        """
+
+        run_time = run_time.to_pydatetime() if hasattr(run_time, "to_pydatetime") else run_time
+
+        date_prefix = f"{self.video_prefix}/{run_time.date()}"
+
+        candidates = []
+
+        for obj in self.list_objects_meta(date_prefix):
+
+            key = obj["Key"]
+
+            if not key.lower().endswith(_VIDEO_EXTENSIONS):
+                continue
+
+            video_time = self.parse_video_time(key)
+
+            if video_time is None or video_time > run_time:
+                continue
+
+            candidates.append((video_time, key))
+
+        if not candidates:
+            return None
+
+        candidates.sort(key=lambda item: item[0])
+
+        return candidates[-1][1]
+
+    # --------------------------------------------------
+
+    def fetch_latest_video(self, run_time):
+        """
+        Downloads the latest same-day Windy video at/before
+        run_time into the local video cache and returns its
+        path, or None if there is no such video. Skips the
+        download when the cached file already matches.
+        """
+
+        key = self.latest_video_before(run_time)
+
+        if key is None:
+            return None
+
+        filename = key.split("/")[-1]
+        local_path = Path(self.video_cache) / filename
+
+        if local_path.exists():
+            return local_path
+
+        return self.download(key, local_path)

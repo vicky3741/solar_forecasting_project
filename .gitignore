@@ -13,3 +13,6 @@ outputs/
 
 # Logs
 logs/
+
+# Windy videos pulled from S3 (large binaries, re-fetchable from the bucket)
+data/windy/s3_cache/

@@ -84,9 +84,12 @@ storage:
   region: ap-south-1
   # Team 3's data-lake layout: inputs/<state>/<site>/<date>/<DataType>/
   site_prefix: inputs/MadhyaPradesh/SIRMOUR
+  # Windy cloud videos (same bucket, viewable via Team 3's site at 13.206.205.164)
+  video_prefix: videos/MadhyaPradesh/SIRMOUR
+  video_cache: data/windy/s3_cache
   # Where this team writes its own forecast outputs back to the bucket
   output_prefix: outputs/team2/SIRMOUR
-  auto_pull: true    # orchestrator pulls the latest meter data from S3 before forecasting
+  auto_pull: true    # orchestrator pulls the latest meter data + same-day Windy video from S3 before forecasting
   auto_push: true    # orchestrator pushes the forecast + current schedule back to S3 after
 
 logging:

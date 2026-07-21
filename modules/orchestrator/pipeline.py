@@ -149,6 +149,30 @@ class Orchestrator:
 
     # --------------------------------------------------
 
+    def get_latest_video(self, run_time):
+        """
+        Path to the latest same-day Windy video at/before
+        run_time. Prefers the live S3 feed (Team 3's bucket,
+        also viewable at 13.206.205.164) when storage is on,
+        falling back to any local videos. Returns None if
+        neither has one.
+        """
+
+        if self.auto_pull:
+            try:
+                video_path = self.storage.fetch_latest_video(run_time)
+                if video_path is not None:
+                    return video_path
+
+            except Exception as error:
+                self.logger.warning(
+                    f"S3 video fetch skipped ({error}) - trying local videos"
+                )
+
+        return self.vision.find_latest_video(self.windy_folder, run_time)
+
+    # --------------------------------------------------
+
     def get_vision_features(self, run_time):
         """
         Most recent same-day Windy video's Gemini features, or
@@ -156,10 +180,7 @@ class Orchestrator:
         rather than blocking the forecast.
         """
 
-        video_path = self.vision.find_latest_video(
-            self.windy_folder,
-            run_time
-        )
+        video_path = self.get_latest_video(run_time)
 
         if video_path is None:
             return None
@@ -172,7 +193,7 @@ class Orchestrator:
 
         except Exception as error:
             self.logger.warning(
-                f"Vision analysis failed for {video_path.name}: {error} "
+                f"Vision analysis failed for {Path(video_path).name}: {error} "
                 "- continuing without the vision signal"
             )
             return None
