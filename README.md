@@ -43,8 +43,18 @@ Plant location ─────► pvlib clear-sky physics ───────�
    separate 2-hour / 2-4-hour irradiance trends. Applied as a
    **time-phased** per-block adjustment that ramps in at the predicted
    cloud arrival time.
-5. **Enercast** — used strictly as a validation benchmark, never as a
+5. **Open-Meteo (weather forecast)** — free, no API key. Supplies a
+   *forward-looking* forecasted GHI for every future block (the one
+   thing the other signals lack). Converted to a forecasted clear-sky
+   index and blended in at weight 0.65 (tuned + leave-one-day-out
+   validated). This was the single biggest accuracy gain — it closed
+   the gap to Enercast from ~2 points to ~0.17.
+6. **Enercast** — used strictly as a validation benchmark, never as a
    model input.
+
+Note: the LightGBM residual correction (below) is currently disabled —
+once the weather signal was added it stopped helping out-of-sample, so
+it is off pending re-evaluation.
 
 The final forecast per block = blended kt × clear-sky generation curve,
 clipped to plant capacity — then passed through a **residual correction**:
@@ -140,12 +150,15 @@ automatically at the 7 official times: 06:45, 08:15, 09:45, 11:15, 12:45,
 ## Current results (honest)
 
 Backtested point-in-time (no lookahead) across 13 days (Jul 6–18) × 7
-run-times = 91 runs:
+run-times = 91 runs, WITH the Open-Meteo weather signal:
 
 | Metric (avg over comparable runs) | Ours | Enercast |
 |---|---|---|
-| Deviation (% of capacity) | 8.6% | 6.7% |
-| Runs won | 24 / 84 | 60 / 84 |
+| Deviation (% of capacity) | 6.85% | 6.68% |
+| Runs won | 41 / 84 | 43 / 84 |
+
+(Before the weather signal we were at 8.6% and won only 24/84 — weather
+closed almost the entire gap to Enercast.)
 
 Out-of-sample check: parameters tuned on week 1 (Jul 6–12) were tested
 on unseen week 2 (Jul 13–18) and performed *better* there (7.8% vs
