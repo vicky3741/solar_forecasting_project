@@ -32,9 +32,13 @@ from config.config import settings
 from utils.logger import get_logger
 
 
-# Windy video filenames: sirmour_YYMMDD_HH_MM.<ext>
-# e.g. sirmour_260721_12_57.mp4 -> 2026-07-21 12:57
+# Windy video filenames come in two formats:
+#   current  : sirmour_YYMMDD_HH_MM.<ext>       e.g. sirmour_260721_12_57.mp4
+#   older     : ..._SIRMOUR_satellite_YYYY-MM-DD_HH-MM-SS_clean.mp4 (Jul 14-15)
 _VIDEO_TIME_PATTERN = re.compile(r"sirmour_(\d{2})(\d{2})(\d{2})_(\d{2})_(\d{2})")
+_VIDEO_TIME_PATTERN_OLD = re.compile(
+    r"(\d{4})-(\d{2})-(\d{2})_(\d{2})-(\d{2})-(\d{2})"
+)
 
 _VIDEO_EXTENSIONS = (".mp4", ".webm")
 
@@ -260,20 +264,26 @@ class S3Storage:
     def parse_video_time(key):
         """
         Recording datetime encoded in a Windy video filename,
-        or None if it does not match the expected pattern.
+        or None if it matches neither known pattern.
         """
 
         match = _VIDEO_TIME_PATTERN.search(key)
+        if match:
+            yy, mm, dd, hh, minute = map(int, match.groups())
+            try:
+                return datetime(2000 + yy, mm, dd, hh, minute)
+            except ValueError:
+                return None
 
-        if not match:
-            return None
+        match = _VIDEO_TIME_PATTERN_OLD.search(key)
+        if match:
+            yyyy, mm, dd, hh, minute, ss = map(int, match.groups())
+            try:
+                return datetime(yyyy, mm, dd, hh, minute, ss)
+            except ValueError:
+                return None
 
-        yy, mm, dd, hh, minute = map(int, match.groups())
-
-        try:
-            return datetime(2000 + yy, mm, dd, hh, minute)
-        except ValueError:
-            return None
+        return None
 
     # --------------------------------------------------
 
