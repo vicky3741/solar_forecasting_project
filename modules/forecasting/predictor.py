@@ -50,6 +50,7 @@ import pandas as pd
 from config.config import settings
 from modules.forecasting.chronos_model import ChronosModel
 from modules.forecasting.clearsky import ClearSkyModel
+from modules.weather.open_meteo import OpenMeteoClient
 
 
 class HybridPredictor:
@@ -59,6 +60,8 @@ class HybridPredictor:
         self.chronos = ChronosModel()
 
         self.clearsky = ClearSkyModel()
+
+        self.weather = OpenMeteoClient()
 
         self.capacity_kw = settings["plant"]["capacity_mw"] * 1000
 
@@ -72,6 +75,7 @@ class HybridPredictor:
         self.trend_halflife_min = blend_settings.get("trend_halflife_min", 90)
 
         self.performance_ratio = settings["clearsky"]["performance_ratio"]
+        self.weather_weight = settings.get("weather", {}).get("weather_weight", 0.0)
 
         # Clear-sky index rarely exceeds ~1.2 even under cloud-enhancement
         # effects; clip any forecasted kt to a sane physical range.
@@ -266,9 +270,9 @@ class HybridPredictor:
             (forecast_timestamps - run_time).total_seconds().to_numpy() / 60
         )
 
-        poa_curve = self.clearsky.get_poa_irradiance(
-            forecast_timestamps
-        )["poa_global"].to_numpy()
+        clearsky_irradiance = self.clearsky.get_poa_irradiance(forecast_timestamps)
+        poa_curve = clearsky_irradiance["poa_global"].to_numpy()
+        clearsky_ghi = clearsky_irradiance["ghi"].to_numpy()
 
         chronos_kt_forecast = self.get_chronos_kt_forecast(
             dataframe,
@@ -284,6 +288,8 @@ class HybridPredictor:
 
         context_ratio = self.get_context_ratio(dataframe, run_time)
 
+        weather_kt = self.get_weather_kt(forecast_timestamps, clearsky_ghi)
+
         return {
             "forecast_timestamps": forecast_timestamps,
             "horizon_minutes": horizon_minutes,
@@ -291,8 +297,44 @@ class HybridPredictor:
             "kt_now": kt_now,
             "kt_slope_per_min": kt_slope_per_min,
             "poa_curve": poa_curve,
-            "context_ratio": context_ratio
+            "context_ratio": context_ratio,
+            "weather_kt": weather_kt
         }
+
+    # --------------------------------------------------
+
+    def get_weather_kt(self, forecast_timestamps, clearsky_ghi):
+        """
+        Forward-looking clear-sky index from the Open-Meteo
+        forecast: forecasted GHI / clear-sky GHI per block.
+        Returns None when weather is disabled/unavailable so
+        the blend cleanly falls back to no-weather. Low-sun
+        blocks (tiny clear-sky GHI) are filled with 1.0 - they
+        are multiplied by a near-zero curve later, so the value
+        there does not matter.
+        """
+
+        if not self.weather.enabled:
+            return None
+
+        try:
+            weather_ghi = self.weather.forecast_ghi_at(forecast_timestamps)
+        except Exception:
+            weather_ghi = None
+
+        if weather_ghi is None:
+            return None
+
+        weather_kt = np.divide(
+            weather_ghi,
+            clearsky_ghi,
+            out=np.full_like(clearsky_ghi, np.nan, dtype=float),
+            where=clearsky_ghi > 10
+        )
+
+        weather_kt = np.clip(weather_kt, 0, self.max_clear_sky_index)
+
+        return np.nan_to_num(weather_kt, nan=1.0)
 
     # --------------------------------------------------
 
@@ -301,12 +343,14 @@ class HybridPredictor:
                       chronos_weight=None,
                       performance_ratio=None,
                       trend_halflife_min=None,
+                      weather_weight=None,
                       vision_adjustment=0.0):
         """
         Cheap, pure-numpy blend of already-computed signals.
         Safe to call repeatedly with different chronos_weight
-        / performance_ratio / trend_halflife candidates for
-        tuning, since it never touches Chronos or pvlib.
+        / performance_ratio / trend_halflife / weather_weight
+        candidates for tuning, since it never touches Chronos,
+        pvlib or the network.
 
         `vision_adjustment` may be a scalar or a per-block
         array matching the forecast horizon.
@@ -320,6 +364,9 @@ class HybridPredictor:
 
         if trend_halflife_min is None:
             trend_halflife_min = self.trend_halflife_min
+
+        if weather_weight is None:
+            weather_weight = self.weather_weight
 
         alpha = chronos_weight * signals["context_ratio"]
 
@@ -344,10 +391,22 @@ class HybridPredictor:
             self.max_clear_sky_index
         )
 
-        final_kt = (
+        base_kt = (
             alpha * signals["chronos_kt_forecast"]
             + (1 - alpha) * kt_persistence
         )
+
+        # Fold in the forward-looking Open-Meteo forecast, when
+        # available and given a non-zero weight. This is the one
+        # signal that actually knows about weather still to come;
+        # weather_weight (tuned on the backtest) sets how much it
+        # overrides the meter/physics base blend.
+        weather_kt = signals.get("weather_kt")
+
+        if weather_kt is not None and weather_weight > 0:
+            final_kt = weather_weight * weather_kt + (1 - weather_weight) * base_kt
+        else:
+            final_kt = base_kt
 
         clearsky_curve = (
             signals["poa_curve"] / 1000

@@ -67,10 +67,15 @@ def build_features(detail, kt_lookup):
 def train_past_only(detail, day):
     """
     LightGBM residual model trained only on days before `day`.
-    Returns None when there is not yet enough history (the
-    production min-training-days gate) - callers then apply no
-    correction, exactly as production would.
+    Returns None when residual correction is disabled in config
+    (as it is now that weather superseded it), or when there is
+    not yet enough history (the production min-training-days
+    gate) - callers then apply no correction, exactly as
+    production would.
     """
+
+    if not settings.get("residual_correction", {}).get("enabled", False):
+        return None
 
     past_days = [d for d in sorted(detail["date"].unique()) if d < day]
 

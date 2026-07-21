@@ -49,13 +49,20 @@ hybrid_blend:
   trend_halflife_min: 0    # smart-persistence damping: recent kt slope saturates at slope*halflife; 0 disables the trend (flat persistence). TUNED 2026-07-18: the grid search found 0 (flat) beats 45/90/180 on this 7-day dataset - the capability stays in the code for re-testing when more data arrives.
 
 residual_correction:
-  enabled: true
-  model_path: models/residual_lgbm.txt  # trained by tests/test_residual_experiment.py; VALIDATED 2026-07-19 leave-one-day-out on 13 days: +1.14 pct points on unseen days, helped 10/13. Retrain (rerun that script) whenever new days of data arrive.
+  enabled: false           # DISABLED 2026-07-21: once the Open-Meteo weather signal was added, the base forecast became accurate enough that the residual correction no longer helps - leave-one-day-out went to -0.37 pts (4/13 days). It was a crutch for the missing forward-looking signal; weather made it redundant. Re-evaluate (rerun tests/test_residual_experiment.py) if the base model changes; re-enable only if it helps out-of-sample again.
+  model_path: models/residual_lgbm.txt  # trained by tests/test_residual_experiment.py; helped +1.14 pts BEFORE weather was added, now superseded.
   min_training_days: 8   # EVIDENCE-BASED (walk-forward test 2026-07-19): corrections trained on <8 days made forecasts WORSE (-0.97 avg); 8+ days gave +1.2. The corrector stays silently off until the trained model has at least this many days behind it.
 
 clearsky:
   model: ineichen          # pvlib clear-sky model; free, no external data/API needed
   performance_ratio: 0.80  # RE-TUNED 2026-07-19 on the full 13-day dataset (Jul 6-18): grid best was 0.75 (8.596%) with 0.80 statistically tied (8.605%); 0.80 chosen as it ranked top-2 in BOTH tuning windows (week-1-only grid favored 0.85, full-data favors 0.75) - the stable middle. Re-tune as more days arrive.
+
+weather:
+  enabled: true
+  provider: open_meteo     # free, no API key; forward-looking forecasted GHI
+  weather_weight: 0.65     # TUNED + VALIDATED 2026-07-21: sweep found a flat optimum plateau 0.6-0.8 (dev ~7.28-7.31%); 0.65 = stable middle. Baseline (weather off) was 8.56% -> -1.2 pts. Leave-one-day-out: weather helped 11/13 unseen days. Weight 1.0 (weather only) was WORSE (7.54%), confirming the blend beats the raw forecast. Re-tune as more days arrive.
+  cache_dir: data/weather/openmeteo_cache
+  timeout_seconds: 25
 
 paths:
   raw_data: data/raw

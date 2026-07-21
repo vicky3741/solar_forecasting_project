@@ -12,3 +12,4 @@ uvicorn
 lightgbm
 Pillow
 boto3
+requests

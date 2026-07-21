@@ -16,3 +16,6 @@ logs/
 
 # Windy videos pulled from S3 (large binaries, re-fetchable from the bucket)
 data/windy/s3_cache/
+
+# Cached Open-Meteo weather responses (re-fetchable from the free API)
+data/weather/openmeteo_cache/
