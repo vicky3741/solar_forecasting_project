@@ -43,6 +43,7 @@ from modules.forecasting.residual_correction import ResidualCorrector
 from modules.forecasting.case_based_correction import CaseBasedCorrector
 from modules.fusion.fusion import FeatureFusion
 from modules.vision.vision_module import VisionModule
+from modules.storage.s3_client import S3Storage
 from modules.evaluation import metrics
 
 
@@ -52,15 +53,50 @@ RUN_TIMES = settings["forecast"]["run_times"]
 VIDEO_DIR = Path(settings["windy_capture"]["video_dir"])
 CACHE_ROOT = Path("outputs/llm_compare")
 
+# The mentor's document treats the clip STORED IN S3 at each scheduling
+# time as the canonical input, and the bucket carries Team 3's feed as
+# well as our own captures. Reading only the local folder made whole days
+# look uncovered: 2026-07-25 scored 1/7 scheduling times locally but is
+# 7/7 once the bucket is included. Judging the vision models on days where
+# 6 of 7 runs silently fell back to no-vision is what made Gemini,
+# ChatGPT and no-vision look identical.
+_S3 = S3Storage()
+_S3_INDEX = None
+
 TRIM_START_FRACTION = 0.15
 TRIM_END_FRACTION = 0.70
 TARGET_FRAMES = 6
 
 
+def s3_video_index():
+    """
+    {datetime: bucket key} for every Windy clip in the bucket, built
+    once. Cheap compared to re-listing per scheduling time.
+    """
+
+    global _S3_INDEX
+
+    if _S3_INDEX is None:
+        _S3_INDEX = {}
+        try:
+            for obj in _S3.list_objects_meta(_S3.video_prefix):
+                key = obj["Key"]
+                if not key.lower().endswith((".webm", ".mp4")):
+                    continue
+                captured = _S3.parse_video_time(key)
+                if captured is not None:
+                    _S3_INDEX[captured] = key
+        except Exception as error:
+            print(f"  (S3 video listing unavailable: {error})")
+
+    return _S3_INDEX
+
+
 def find_video_for(day, run_time_str):
     """
-    The Windy clip captured AT this scheduling time (within a few
-    minutes). Returns None when that capture is missing, so the run
+    The Windy clip stored FOR this scheduling time (within a few
+    minutes), looking at our local captures first and then the S3
+    feed. Returns None when no clip exists at that time, so the run
     honestly falls back to no-vision rather than borrowing another
     time's video.
     """
@@ -69,15 +105,41 @@ def find_video_for(day, run_time_str):
     target = pd.Timestamp(day) + pd.Timedelta(hours=hour, minutes=minute)
 
     best = None
-    for path in VIDEO_DIR.glob("*.webm"):
-        captured = VisionModule.parse_video_time(path.name)
-        if captured is None or captured.date() != day:
+
+    for pattern in ("*.webm", "*.mp4"):
+        for path in VIDEO_DIR.glob(pattern):
+            captured = VisionModule.parse_video_time(path.name)
+            if captured is None or captured.date() != day:
+                continue
+            gap = abs((pd.Timestamp(captured) - target).total_seconds())
+            if gap <= 300 and (best is None or gap < best[0]):   # within 5 min
+                best = (gap, path)
+
+    if best is not None:
+        return best[1]
+
+    # Nothing local for this slot - fall back to the bucket.
+    for captured, key in s3_video_index().items():
+        if captured.date() != day:
             continue
         gap = abs((pd.Timestamp(captured) - target).total_seconds())
-        if gap <= 300 and (best is None or gap < best[0]):   # within 5 min
-            best = (gap, path)
+        if gap <= 300 and (best is None or gap < best[0]):
+            best = (gap, key)
 
-    return best[1] if best else None
+    if best is None:
+        return None
+
+    key = best[1]
+    local_path = Path(_S3.video_cache) / key.split("/")[-1]
+
+    if not local_path.exists():
+        try:
+            _S3.download(key, local_path)
+        except Exception as error:
+            print(f"  (could not fetch {key}: {error})")
+            return None
+
+    return local_path
 
 
 def vision_features_for(provider, video_path):
@@ -196,14 +258,18 @@ def main():
         actual_columns.append("is_real_measurement")
     actual = processed[actual_columns]
 
-    # Days that have BOTH videos at the scheduling times and meter data.
-    video_days = sorted({
+    # Days that have BOTH videos at the scheduling times and meter data,
+    # counting our local captures AND the S3 feed.
+    video_days = {
         VisionModule.parse_video_time(p.name).date()
-        for p in VIDEO_DIR.glob("*.webm")
+        for pattern in ("*.webm", "*.mp4")
+        for p in VIDEO_DIR.glob(pattern)
         if VisionModule.parse_video_time(p.name) is not None
-    })
+    }
+    video_days |= {captured.date() for captured in s3_video_index()}
+
     meter_days = set(processed["timestamp"].dt.date)
-    days = [d for d in video_days if d in meter_days]
+    days = sorted(d for d in video_days if d in meter_days)
 
     predictor = HybridPredictor()
     fusion = FeatureFusion()
