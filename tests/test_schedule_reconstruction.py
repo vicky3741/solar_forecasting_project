@@ -39,6 +39,8 @@ import pandas as pd
 
 from config.config import settings
 from modules.forecasting.predictor import HybridPredictor
+from modules.forecasting.residual_correction import ResidualCorrector
+from modules.forecasting.case_based_correction import CaseBasedCorrector
 from modules.fusion.fusion import FeatureFusion
 from modules.vision.vision_module import VisionModule
 from modules.evaluation import metrics
@@ -100,7 +102,7 @@ def vision_features_for(provider, video_path):
         return None
 
 
-def reconstruct_day(predictor, fusion, processed, day, provider):
+def reconstruct_day(predictor, fusion, correctors, processed, day, provider):
     """
     Walks the 7 scheduling times in order, each time rewriting only
     the blocks that are still in the future. Returns the final
@@ -129,6 +131,11 @@ def reconstruct_day(predictor, fusion, processed, day, provider):
         )
 
         forecast = predictor.blend_signals(signals, vision_adjustment=adjustment)
+
+        # Same corrections the live pipeline applies, so this scores the
+        # model we would really publish from - not a weaker stand-in.
+        for corrector in correctors:
+            forecast = corrector.apply(forecast, run_time, signals["kt_now"])
 
         # Rewrite future blocks only; earlier blocks keep their values.
         written = 0
@@ -201,11 +208,19 @@ def main():
     predictor = HybridPredictor()
     fusion = FeatureFusion()
 
+    correctors = []
+    for corrector in (ResidualCorrector(), CaseBasedCorrector()):
+        if corrector.available:
+            corrector.load()
+            correctors.append(corrector)
+
     print("=" * 88)
     print("SCHEDULE RECONSTRUCTION - the mentor's evaluation workflow")
     print("=" * 88)
     print("Each scheduling time rewrites only the FUTURE blocks, so the day builds")
     print("into ONE final schedule - exactly what would have been published live.")
+    active = ", ".join(type(c).__name__ for c in correctors) or "none"
+    print(f"Corrections active (same as the live pipeline): {active}")
     print()
 
     all_rows = []
@@ -232,7 +247,7 @@ def main():
                                 ("ChatGPT", "openai")]:
 
             final, contributions = reconstruct_day(
-                predictor, fusion, processed, day, provider
+                predictor, fusion, correctors, processed, day, provider
             )
             score = score_schedule(final, actual)
 
