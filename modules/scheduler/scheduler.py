@@ -40,8 +40,13 @@ import time
 import schedule as schedule_lib
 
 from config.config import settings
-from modules.orchestrator.pipeline import Orchestrator
 from utils.logger import get_logger
+
+# NOTE: modules.orchestrator.pipeline is deliberately NOT imported here.
+# Importing it pulls in torch and chronos, which costs ~450 MB of resident
+# memory the moment this module loads - even though nothing runs until a
+# scheduled time fires. On the ~900 MB EC2 box that idle cost is what
+# starves Chromium during a capture. The import happens inside run_now().
 
 
 class AlreadyRunning(Exception):
@@ -151,9 +156,12 @@ class Scheduler:
         self.capture_video()
 
         try:
-            # Built here rather than in __init__ (see module docstring):
-            # the ~420 MB of torch/Chronos weights are released again
-            # once the run returns, instead of sitting resident all day.
+            # Imported AND built here rather than at module scope (see the
+            # note by the imports): torch/chronos cost ~450 MB just to
+            # import, and that memory is only needed while a run is
+            # actually in flight.
+            from modules.orchestrator.pipeline import Orchestrator
+
             Orchestrator().run()
 
         except Exception as error:
