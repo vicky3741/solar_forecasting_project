@@ -288,7 +288,11 @@ class HybridPredictor:
 
         context_ratio = self.get_context_ratio(dataframe, run_time)
 
-        weather_kt = self.get_weather_kt(forecast_timestamps, clearsky_ghi)
+        weather_kt = self.get_weather_kt(
+            forecast_timestamps,
+            clearsky_ghi,
+            as_of=run_time
+        )
 
         return {
             "forecast_timestamps": forecast_timestamps,
@@ -303,7 +307,7 @@ class HybridPredictor:
 
     # --------------------------------------------------
 
-    def get_weather_kt(self, forecast_timestamps, clearsky_ghi):
+    def get_weather_kt(self, forecast_timestamps, clearsky_ghi, as_of=None):
         """
         Forward-looking clear-sky index from the Open-Meteo
         forecast: forecasted GHI / clear-sky GHI per block.
@@ -318,7 +322,10 @@ class HybridPredictor:
             return None
 
         try:
-            weather_ghi = self.weather.forecast_ghi_at(forecast_timestamps)
+            weather_ghi = self.weather.forecast_ghi_at(
+                forecast_timestamps,
+                as_of=as_of
+            )
         except Exception:
             weather_ghi = None
 

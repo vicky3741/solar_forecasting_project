@@ -89,16 +89,50 @@ class Evaluator:
         """
         forecast : DataFrame with timestamp, final_forecast_kw
         actual   : DataFrame with timestamp, active_power_kw
+                   (optionally is_real_measurement)
 
         Returns the merged comparison table plus a metrics
         report for our forecast and, where available, Enercast.
+
+        When `actual` carries an is_real_measurement flag, blocks
+        the meter never actually recorded (reconstructed by
+        gap-filling) are dropped before scoring - so accuracy is
+        only ever measured against genuine readings, never against
+        interpolated data. The forecast itself is unaffected; this
+        only governs what we grade against.
         """
 
+        actual_columns = ["timestamp", "active_power_kw"]
+
+        if "is_real_measurement" in actual.columns:
+            actual_columns.append("is_real_measurement")
+
         comparison = forecast.merge(
-            actual[["timestamp", "active_power_kw"]],
+            actual[actual_columns],
             on="timestamp",
             how="inner"
         )
+
+        if "is_real_measurement" in comparison.columns:
+            comparison = comparison[
+                comparison["is_real_measurement"].fillna(False)
+            ].reset_index(drop=True)
+            comparison = comparison.drop(columns=["is_real_measurement"])
+
+        # No overlap between forecast and actual - happens when the
+        # day's meter data has not arrived yet, or when every block
+        # in range was reconstructed (no real reading to grade
+        # against). Return an empty result rather than indexing row 0
+        # of an empty frame, which used to raise "single positional
+        # indexer is out-of-bounds" and abort the end-of-day run.
+        if comparison.empty:
+            return comparison, {
+                "our_forecast": None,
+                "note": (
+                    "no real (measured) generation overlapping this "
+                    "forecast - cannot score the run yet"
+                )
+            }
 
         enercast_day = self.load_enercast_day(
             comparison["timestamp"].iloc[0].date()

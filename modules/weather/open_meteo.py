@@ -37,6 +37,7 @@ from utils.logger import get_logger
 class OpenMeteoClient:
 
     HISTORICAL_URL = "https://historical-forecast-api.open-meteo.com/v1/forecast"
+    SINGLE_RUN_URL = "https://single-runs-api.open-meteo.com/v1/forecast"
     FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
 
     def __init__(self):
@@ -53,29 +54,78 @@ class OpenMeteoClient:
         self.weather_weight = weather.get("weather_weight", 0.0)
         self.cache_dir = Path(weather.get("cache_dir", "data/weather/openmeteo_cache"))
         self.timeout = weather.get("timeout_seconds", 25)
+        # A forecast model run is not usable at the exact instant it starts.
+        # Keep a conservative buffer in historical backtests so they cannot
+        # accidentally use a run that would still have been publishing.
+        self.availability_lag_minutes = weather.get(
+            "historical_availability_lag_minutes", 120
+        )
+        self.single_run_forecast_days = weather.get(
+            "single_run_forecast_days", 3
+        )
 
     # --------------------------------------------------
 
-    def _cache_path(self, date_str):
-        return self.cache_dir / f"{date_str}.json"
+    def _cache_path(self, date_str, model_run=None):
+        if model_run is None:
+            return self.cache_dir / f"{date_str}.json"
+
+        label = pd.Timestamp(model_run).strftime("%Y%m%dT%H%M")
+        return self.cache_dir / f"{date_str}__run_{label}.json"
 
     # --------------------------------------------------
 
-    def fetch_day(self, date_str):
+    def select_historical_model_run(self, as_of):
+        """Return the latest 6-hourly UTC model cycle safely available.
+
+        This is deliberately based on *when the forecast was made*, not the
+        target timestamp being predicted.  The previous implementation used a
+        stitched historical series whose later blocks could come from model
+        updates issued after a simulated forecast run.
+        """
+
+        as_of = pd.Timestamp(as_of)
+
+        if as_of.tzinfo is None:
+            as_of = as_of.tz_localize(self.timezone)
+        else:
+            as_of = as_of.tz_convert(self.timezone)
+
+        available_utc = (
+            as_of.tz_convert("UTC")
+            - pd.Timedelta(minutes=self.availability_lag_minutes)
+        )
+
+        return available_utc.floor("6h").tz_localize(None)
+
+    # --------------------------------------------------
+
+    def fetch_day(self, date_str, as_of=None):
         """
         Hourly forecasted GHI / cloud cover / temperature for
         one day, as a DataFrame indexed by (tz-naive local)
-        timestamp. Cached to disk. Returns None on failure so
-        callers degrade to no-weather rather than crashing.
+        timestamp.  For historical point-in-time evaluation, ``as_of`` selects
+        one archived model run that was available before the forecast time;
+        it never uses the stitched historical series. Cached to disk. Returns
+        None on failure so callers degrade to no-weather rather than crashing.
         """
 
-        cache_path = self._cache_path(date_str)
+        target = pd.Timestamp(date_str).date()
+        today = date_cls.today()
+
+        # Historical evaluation needs a specific archived forecast issue time.
+        # Live/current forecasts still use the regular live endpoint.
+        model_run = None
+        if as_of is not None and target < today:
+            model_run = self.select_historical_model_run(as_of)
+
+        cache_path = self._cache_path(date_str, model_run)
 
         if cache_path.exists():
             with open(cache_path, "r", encoding="utf-8") as file:
                 data = json.load(file)
         else:
-            data = self._request(date_str)
+            data = self._request(date_str, model_run=model_run)
             if data is None:
                 return None
             self.cache_dir.mkdir(parents=True, exist_ok=True)
@@ -88,31 +138,40 @@ class OpenMeteoClient:
         if not times:
             return None
 
-        return pd.DataFrame({
+        frame = pd.DataFrame({
             "timestamp": pd.to_datetime(times),
             "ghi": hourly.get("shortwave_radiation", [np.nan] * len(times)),
             "cloud_cover": hourly.get("cloud_cover", [np.nan] * len(times)),
         })
 
+        # A single archived run returns its full horizon. Keep only the day
+        # requested by the caller, including when the run began the evening
+        # before the target date.
+        return frame[frame["timestamp"].dt.date == target].reset_index(drop=True)
+
     # --------------------------------------------------
 
-    def _request(self, date_str):
-
-        target = pd.Timestamp(date_str).date()
-        today = date_cls.today()
-
-        # Past days -> the forecast that was issued then (no lookahead).
-        # Today/future -> the live forecast.
-        url = self.HISTORICAL_URL if target < today else self.FORECAST_URL
+    def _request(self, date_str, model_run=None):
 
         params = {
             "latitude": self.latitude,
             "longitude": self.longitude,
             "hourly": "shortwave_radiation,cloud_cover,temperature_2m",
             "timezone": self.timezone,
-            "start_date": date_str,
-            "end_date": date_str,
         }
+
+        if model_run is None:
+            # Today/future: use the currently available live forecast.
+            url = self.FORECAST_URL
+            params["start_date"] = date_str
+            params["end_date"] = date_str
+        else:
+            # Historical: preserve a single model run.  Open-Meteo's regular
+            # historical endpoint stitches later runs into one series, which
+            # is unsuitable for a point-in-time forecast backtest.
+            url = self.SINGLE_RUN_URL
+            params["run"] = pd.Timestamp(model_run).strftime("%Y-%m-%dT%H:%M")
+            params["forecast_days"] = self.single_run_forecast_days
 
         try:
             response = requests.get(url, params=params, timeout=self.timeout)
@@ -125,7 +184,7 @@ class OpenMeteoClient:
 
     # --------------------------------------------------
 
-    def forecast_ghi_at(self, timestamps):
+    def forecast_ghi_at(self, timestamps, as_of=None):
         """
         Forecasted GHI aligned to the given 15-minute
         timestamps (hourly forecast interpolated). Returns
@@ -136,7 +195,7 @@ class OpenMeteoClient:
 
         dates = sorted({ts.strftime("%Y-%m-%d") for ts in timestamps})
 
-        frames = [self.fetch_day(d) for d in dates]
+        frames = [self.fetch_day(d, as_of=as_of) for d in dates]
         frames = [f for f in frames if f is not None]
 
         if not frames:

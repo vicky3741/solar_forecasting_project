@@ -24,18 +24,39 @@ forecast:
   run_times: ["06:45", "08:15", "09:45", "11:15", "12:45", "14:15", "15:45"]
 
 vision:
-  provider: google
-  api_key: ""
+  # Which LLM reads the Windy cloud frames. The two are fully
+  # independent - switching this is the ONLY change needed, and the
+  # unused provider's key/SDK is never touched (see make_vision_client).
+  provider: gemini         # gemini | openai
+  # --- Gemini (Google, free tier) ---
+  api_key: ""              # loaded from .env GOOGLE_API_KEY
   model: gemini-3.5-flash
+  # --- OpenAI / OpenRouter (any OpenAI-compatible vision model) ---
+  openai_api_key: ""       # loaded from .env OPENAI_API_KEY or OPENROUTER_API_KEY
+  openai_model: gpt-4o     # OpenAI direct: gpt-4o / gpt-4o-mini.
+                           # Via OpenRouter set a model id like
+                           # "google/gemma-3-27b-it:free" or "qwen/qwen2.5-vl-72b-instruct".
+  # Set to GitHub Models = FREE GPT-4o (50 req/day, no card). Key = a GitHub
+  # token in .env as OPENAI_API_KEY. Blank this out to use OpenAI direct (paid),
+  # or use https://openrouter.ai/api/v1 for OpenRouter's free vision models.
+  openai_base_url: "https://models.inference.ai.azure.com"
 
   temperature: 0.2
-  max_output_tokens: 8192  # gemini-3.5-flash is a thinking model: internal reasoning consumes output tokens before the visible JSON, so a low cap truncates the response mid-JSON
+  max_output_tokens: 8192  # gemini-3.5-flash is a thinking model: internal reasoning consumes output tokens before the visible JSON, so a low cap truncates the response mid-JSON. Also used as OpenAI max_tokens.
 
   frame_extraction:
     target_frames: 10
   
   analysis:
     timeout_seconds: 60
+
+  # The free tier returns bursts of 503 "high demand". On 2026-07-23 that
+  # wiped out the vision signal on all 3 runs of the day because a single
+  # refusal dropped the run. Retries use exponential backoff
+  # (5s, 10s), and only for transient statuses.
+  retry:
+    max_attempts: 3
+    base_seconds: 5
 
 
 forecast_model:
@@ -53,6 +74,23 @@ residual_correction:
   model_path: models/residual_lgbm.txt  # trained by tests/test_residual_experiment.py; helped +1.14 pts BEFORE weather was added, now superseded.
   min_training_days: 8   # EVIDENCE-BASED (walk-forward test 2026-07-19): corrections trained on <8 days made forecasts WORSE (-0.97 avg); 8+ days gave +1.2. The corrector stays silently off until the trained model has at least this many days behind it.
 
+case_based_correction:
+  # ADDED 2026-07-24: teammate Kushal's case-based-reasoning idea adapted to our
+  # pipeline - look up the most similar past forecast situations (by time-of-day,
+  # cloudiness kt, horizon, forecast level) that have REAL measured outcomes, and
+  # nudge the forecast by how those analogues actually turned out. Validated
+  # leave-one-day-out on 17 days against real blocks only (Part 2).
+  enabled: true
+  k: 40                    # nearest analogues retrieved per block (swept: 20-80 all help)
+  strength: 0.5            # CRITICAL: apply only half the retrieved correction. Full strength (1.0) OVERFITS and HURTS (-0.5 pts); 0.5 helps (+0.47 pts, 12/17 unseen days). Re-run tests/test_case_based_experiment.py if the base model changes.
+  min_case_days: 8         # too few days = unreliable analogues; stays off until the case store covers this many days (same lesson as residual_correction)
+  case_store_path: models/case_store.csv  # written by tests/test_case_based_experiment.py after a positive verdict
+  weights:
+    block_hour: 2.0        # time-of-day (solar-elevation proxy) matters most
+    kt_now: 2.0            # cloudiness at run time
+    final_forecast_kw: 1.5
+    horizon_min: 1.0
+
 clearsky:
   model: ineichen          # pvlib clear-sky model; free, no external data/API needed
   performance_ratio: 0.80  # RE-TUNED 2026-07-19 on the full 13-day dataset (Jul 6-18): grid best was 0.75 (8.596%) with 0.80 statistically tied (8.605%); 0.80 chosen as it ranked top-2 in BOTH tuning windows (week-1-only grid favored 0.85, full-data favors 0.75) - the stable middle. Re-tune as more days arrive.
@@ -63,6 +101,38 @@ weather:
   weather_weight: 0.65     # TUNED + VALIDATED 2026-07-21: sweep found a flat optimum plateau 0.6-0.8 (dev ~7.28-7.31%); 0.65 = stable middle. Baseline (weather off) was 8.56% -> -1.2 pts. Leave-one-day-out: weather helped 11/13 unseen days. Weight 1.0 (weather only) was WORSE (7.54%), confirming the blend beats the raw forecast. Re-tune as more days arrive.
   cache_dir: data/weather/openmeteo_cache
   timeout_seconds: 25
+  # Historical comparisons use the latest archived 6-hourly model run that
+  # would have been available at least this long before the simulated run.
+  historical_availability_lag_minutes: 120
+  single_run_forecast_days: 3
+
+# Automated Windy satellite capture. NOTE: Team 3's own feed already
+# uploads Windy videos to the same bucket roughly every 20 minutes;
+# this team's capture runs alongside it at our 7 official run times so
+# we have our own guaranteed clip at each forecast moment.
+windy_capture:
+  enabled: true
+  api_key: ""              # loaded from .env WINDY_API_KEY at import time (config.py), same pattern as vision.api_key. Works without a key too (public embed).
+  zoom: 8
+  overlay: satellite       # Windy embed overlay layer to animate
+  capture_seconds: 20      # how long to record the animation loop
+  headless: true
+  # Auto-captured clips land here, kept separate from the older
+  # hand-recorded July 9 clips still in data/windy/videos.
+  video_dir: data/windy/new_videos
+  upload_to_s3: true       # push each clip to storage.video_prefix so the forecast can pull it back
+  subprocess_timeout_seconds: 300   # hard kill for one capture; must exceed capture_seconds plus browser startup plus the layer screenshots
+  # Premium session saved by `python -m modules.capture.windy_login` (one-time,
+  # interactive). Absent = free public embed, which still works. MUST stay
+  # gitignored - Team 1 leaked their equivalent file to a public repo.
+  session_file: windy_session.json
+  # Extra still layers grabbed alongside the satellite clip. solarpower is
+  # Windy's modelled irradiance - much closer to what we forecast than cloud
+  # pictures are. Some of these need the premium session to render.
+  layers: [solarpower, clouds]
+  screenshot_dir: data/windy/screenshots
+  vis_button_position: [117, 688]   # pixel coords of the VIS/BLUE/INF toggle in the embed's fixed 1280x720 layout
+  play_button_position: [31, 665]   # pixel coords of the timeline play/pause button
 
 paths:
   raw_data: data/raw

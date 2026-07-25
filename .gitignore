@@ -4,6 +4,12 @@
 # Environment variables / secrets
 .env
 
+# Windy premium browser session (equivalent to being logged in).
+# NEVER commit this - Team 1 published theirs (windy_login.json) to a
+# public repo, exposing their premium account to anyone who found it.
+windy_session.json
+windy_login.json
+
 # Python cache
 __pycache__/
 *.pyc
@@ -16,6 +22,15 @@ logs/
 
 # Windy videos pulled from S3 (large binaries, re-fetchable from the bucket)
 data/windy/s3_cache/
+
+# Auto-captured Windy videos (7x/day) - uploaded to S3, so re-fetchable
+# from the bucket; keeping them out of git avoids large-binary bloat.
+# The older July 9 clips were committed before this rule and stay tracked.
+data/windy/videos/sirmour_*.webm
+data/windy/new_videos/
+
+# Per-layer still screenshots (solarpower/clouds) - also uploaded to S3
+data/windy/screenshots/
 
 # Cached Open-Meteo weather responses (re-fetchable from the free API)
 data/weather/openmeteo_cache/

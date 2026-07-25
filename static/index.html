@@ -73,14 +73,17 @@
   th { color: var(--muted); font-weight: 500; }
   .win { color: var(--accent); }
   .loss { color: var(--bad); }
-  canvas { max-height: 340px; }
+  /* Fixed-height wrapper stops the Chart.js responsive-resize loop
+     (canvas resize -> page reflow -> resize -> ...) that made the
+     page stutter and fight scrolling. */
+  .chart-wrap { position: relative; height: 340px; width: 100%; }
   .error { color: var(--bad); font-size: 0.9rem; }
 </style>
 </head>
 <body>
 
   <h1>Sirmour Solar Forecast Dashboard</h1>
-  <p class="subtitle">5.1 MW plant &middot; hybrid Chronos + clear-sky physics forecast &middot; compared against Enercast</p>
+  <p class="subtitle">5.1 MW plant &middot; hybrid Chronos + clear-sky physics forecast &middot; accuracy measured against actual plant generation (Enercast shown only as an external reference)</p>
 
   <div class="grid">
 
@@ -92,8 +95,8 @@
     </div>
 
     <div class="card">
-      <h2>Our Prediction vs Enercast vs Actual</h2>
-      <p class="note">Pick a day and run time to see, block by block, how much energy we predicted, how much Enercast predicted, and how much the plant actually generated. Winner = closer to actual.</p>
+      <h2>Our Forecast vs Actual Generation</h2>
+      <p class="note">Pick a day and run time to see, block by block, how much energy we forecast versus how much the plant actually generated - and how far apart the two are. Enercast's number is shown only as an external reference, never as the thing we are graded against.</p>
       <div class="selector-row">
         <label>Day
           <select id="day-select"></select>
@@ -105,7 +108,7 @@
       <div id="comparison-summary" class="stat-row"></div>
       <table id="comparison-table">
         <thead>
-          <tr><th>Time block</th><th>Our forecast (kW)</th><th>Enercast (kW)</th><th>Actual (kW)</th><th>Closer to actual</th></tr>
+          <tr><th>Time block</th><th>Our forecast (kW)</th><th>Actual (kW)</th><th>Our error (kW)</th><th>Enercast (kW, ref)</th><th>Closer to actual (ref)</th></tr>
         </thead>
         <tbody></tbody>
       </table>
@@ -113,17 +116,17 @@
     </div>
 
     <div class="card">
-      <h2>Forecast Accuracy vs Enercast</h2>
-      <p class="note">Backtested across every official run-time on every day of available history (point-in-time, no lookahead).</p>
+      <h2>Forecast Accuracy vs Actual Generation</h2>
+      <p class="note">Our forecast's average deviation from actual generation, per day, across every official run-time (point-in-time, no lookahead). Lower = closer to reality. The Enercast bar is an external reference only.</p>
       <div id="history-summary" class="stat-row"></div>
-      <canvas id="historyChart"></canvas>
+      <div class="chart-wrap"><canvas id="historyChart"></canvas></div>
     </div>
 
     <div class="card">
       <h2>Per-run detail</h2>
       <table id="history-table">
         <thead>
-          <tr><th>Date</th><th>Run time</th><th>Our deviation %</th><th>Enercast deviation %</th><th>Result</th></tr>
+          <tr><th>Date</th><th>Run time</th><th>Our deviation from actual %</th><th>Enercast deviation % (ref)</th><th>Closer to actual (ref)</th></tr>
         </thead>
         <tbody></tbody>
       </table>
@@ -180,8 +183,11 @@ function renderComparison() {
   const tbody = document.querySelector("#comparison-table tbody");
   tbody.innerHTML = "";
 
+  const CAPACITY_KW = 5100;       // 5.1 MW plant - deviation is scored as % of capacity
+
   let ourEnergy = 0, enercastEnergy = 0, actualEnergy = 0;
-  let ourErrorSum = 0, enercastErrorSum = 0, enercastBlocks = 0;
+  let ourErrorSum = 0, blockCount = 0;                 // our error vs ACTUAL (the graded metric)
+  let enercastErrorSum = 0, enercastBlocks = 0;        // Enercast error vs actual (reference only)
   let ourBlockWins = 0, enercastBlockWins = 0;
 
   rows.forEach(r => {
@@ -193,44 +199,49 @@ function renderComparison() {
     ourEnergy += our * 0.25;      // kW over a 15-min block -> kWh
     actualEnergy += act * 0.25;
 
-    let winner = "n/a", winnerClass = "";
+    // Primary metric: how far OUR forecast is from actual generation.
+    const ourError = Math.abs(our - act);
+    ourErrorSum += ourError;
+    blockCount += 1;
+
+    // Enercast comparison is reference only.
+    let closer = "-", closerClass = "";
     if (hasEnercast) {
       enercastEnergy += ene * 0.25;
-      const ourError = Math.abs(our - act);
       const eneError = Math.abs(ene - act);
-      ourErrorSum += ourError;
       enercastErrorSum += eneError;
       enercastBlocks += 1;
-      if (ourError < eneError) { winner = "Us"; winnerClass = "win"; ourBlockWins += 1; }
-      else { winner = "Enercast"; winnerClass = "loss"; enercastBlockWins += 1; }
+      if (ourError < eneError) { closer = "Ours"; closerClass = "win"; ourBlockWins += 1; }
+      else { closer = "Enercast"; closerClass = "loss"; enercastBlockWins += 1; }
     }
 
     const tr = document.createElement("tr");
     tr.innerHTML = `
       <td>${String(r.timestamp).slice(11, 16)}</td>
       <td>${fmt(our, 0)}</td>
-      <td>${hasEnercast ? fmt(ene, 0) : "-"}</td>
       <td>${fmt(act, 0)}</td>
-      <td class="${winnerClass}">${winner}</td>
+      <td>${fmt(ourError, 0)}</td>
+      <td>${hasEnercast ? fmt(ene, 0) : "-"}</td>
+      <td class="${closerClass}">${closer}</td>
     `;
     tbody.appendChild(tr);
   });
 
-  let overall = "no Enercast data this day";
-  let overallClass = "warn";
-  if (enercastBlocks > 0) {
-    const ourMae = ourErrorSum / enercastBlocks;
-    const eneMae = enercastErrorSum / enercastBlocks;
-    if (ourMae < eneMae) { overall = "We win"; overallClass = "good"; }
-    else { overall = "Enercast wins"; overallClass = "bad"; }
-  }
+  // Our accuracy vs actual - the number the mentor grades us on.
+  const ourMaeKw = blockCount ? ourErrorSum / blockCount : 0;
+  const ourDevPct = blockCount ? (ourMaeKw / CAPACITY_KW) * 100 : 0;
+  const energyErrPct = actualEnergy ? Math.abs(ourEnergy - actualEnergy) / actualEnergy * 100 : 0;
+
+  // Enercast reference (only if Enercast data exists for this run).
+  const eneMaeKw = enercastBlocks ? enercastErrorSum / enercastBlocks : null;
+  const eneDevPct = eneMaeKw === null ? null : (eneMaeKw / CAPACITY_KW) * 100;
 
   document.getElementById("comparison-summary").innerHTML = `
-    <div class="stat"><div class="label">Our predicted energy</div><div class="value">${fmt(ourEnergy / 1000, 2)} MWh</div></div>
-    <div class="stat"><div class="label">Enercast predicted</div><div class="value">${enercastBlocks ? fmt(enercastEnergy / 1000, 2) + " MWh" : "-"}</div></div>
-    <div class="stat"><div class="label">Actual generated</div><div class="value">${fmt(actualEnergy / 1000, 2)} MWh</div></div>
-    <div class="stat"><div class="label">Blocks won (us vs Enercast)</div><div class="value">${enercastBlocks ? ourBlockWins + " vs " + enercastBlockWins : "-"}</div></div>
-    <div class="stat"><div class="label">Overall this run</div><div class="value ${overallClass}">${overall}</div></div>
+    <div class="stat"><div class="label">Our deviation from actual</div><div class="value good">${fmt(ourDevPct, 2)}%</div></div>
+    <div class="stat"><div class="label">Our energy vs actual</div><div class="value">${fmt(ourEnergy / 1000, 2)} / ${fmt(actualEnergy / 1000, 2)} MWh</div></div>
+    <div class="stat"><div class="label">Energy error</div><div class="value">${fmt(energyErrPct, 1)}%</div></div>
+    <div class="stat"><div class="label">Enercast deviation (ref)</div><div class="value">${eneDevPct === null ? "-" : fmt(eneDevPct, 2) + "%"}</div></div>
+    <div class="stat"><div class="label">Blocks closer than Enercast (ref)</div><div class="value">${enercastBlocks ? ourBlockWins + " / " + enercastBlocks : "-"}</div></div>
   `;
 }
 
@@ -247,11 +258,9 @@ async function loadComparison() {
     daySelect.innerHTML = days.map(d => `<option value="${d}">${d}</option>`).join("");
     runSelect.innerHTML = runs.map(r => `<option value="${r}">${r}</option>`).join("");
 
-    // Default to a day that has Enercast data, if any
-    const dayWithEnercast = days.find(d =>
-      comparisonRows.some(r => dateOnly(r.date) === d && r.enercast_kw !== null && r.enercast_kw !== undefined && r.enercast_kw !== "")
-    );
-    if (dayWithEnercast) daySelect.value = dayWithEnercast;
+    // Default to the most recent day - actual generation is the
+    // benchmark now, and every comparison day has actual data.
+    if (days.length) daySelect.value = days[days.length - 1];
 
     daySelect.addEventListener("change", renderComparison);
     runSelect.addEventListener("change", renderComparison);
@@ -277,10 +286,19 @@ async function loadHistory() {
       : null;
     const wins = withEnercast.filter(r => r.our_avg_deviation_pct < Number(r.enercast_avg_deviation_pct)).length;
 
+    // Enercast has no data for some days (e.g. Jul 6), and those are
+    // among our worst. Averaging OUR error over every run while
+    // averaging Enercast's over only the runs it covers compares two
+    // different sets of days and overstates our error. The head-to-head
+    // figure below is therefore restricted to the runs both produced.
+    const ourAvgLikeForLike = withEnercast.length
+      ? withEnercast.reduce((s, r) => s + r.our_avg_deviation_pct, 0) / withEnercast.length
+      : null;
+
     document.getElementById("history-summary").innerHTML = `
-      <div class="stat"><div class="label">Our avg deviation</div><div class="value">${fmt(ourAvg)}%</div></div>
-      <div class="stat"><div class="label">Enercast avg deviation</div><div class="value">${enercastAvg === null ? "-" : fmt(enercastAvg) + "%"}</div></div>
-      <div class="stat"><div class="label">Runs we beat Enercast</div><div class="value">${wins} / ${withEnercast.length}</div></div>
+      <div class="stat"><div class="label">Our avg deviation from actual</div><div class="value good">${fmt(ourAvg)}%</div><div class="label">all ${rows.length} runs</div></div>
+      <div class="stat"><div class="label">Head-to-head vs Enercast</div><div class="value">${ourAvgLikeForLike === null ? "-" : fmt(ourAvgLikeForLike, 2) + "% vs " + fmt(enercastAvg, 2) + "%"}</div><div class="label">same ${withEnercast.length} runs (like-for-like)</div></div>
+      <div class="stat"><div class="label">Runs closer than Enercast (ref)</div><div class="value">${wins} / ${withEnercast.length}</div></div>
     `;
 
     const byDate = {};
@@ -302,19 +320,21 @@ async function loadHistory() {
         labels: dates,
         datasets: [
           {
-            label: "Our avg deviation %",
+            label: "Our deviation from actual %",
             data: dates.map(d => avg(byDate[d].our)),
             backgroundColor: "#3fb37f"
           },
           {
-            label: "Enercast avg deviation %",
+            label: "Enercast deviation % (reference)",
             data: dates.map(d => byDate[d].enercast.length ? avg(byDate[d].enercast) : null),
-            backgroundColor: "#f2a340"
+            backgroundColor: "#5a6b7a"
           }
         ]
       },
       options: {
         responsive: true,
+        maintainAspectRatio: false,   // wrapper controls height; prevents resize loop
+        animation: false,             // no per-frame redraw cost on load/scroll
         scales: {
           x: { ticks: { color: "#93a3b3" }, grid: { display: false } },
           y: { ticks: { color: "#93a3b3" }, grid: { color: "#263544" }, title: { display: true, text: "avg deviation %", color: "#93a3b3" } }
@@ -333,7 +353,7 @@ async function loadHistory() {
         <td>${r.run_time}</td>
         <td>${fmt(r.our_avg_deviation_pct, 2)}%</td>
         <td>${hasEnercast ? fmt(r.enercast_avg_deviation_pct, 2) + "%" : "-"}</td>
-        <td class="${hasEnercast ? (weWin ? "win" : "loss") : ""}">${hasEnercast ? (weWin ? "We win" : "Enercast wins") : "n/a"}</td>
+        <td class="${hasEnercast ? (weWin ? "win" : "loss") : ""}">${hasEnercast ? (weWin ? "Ours" : "Enercast") : "-"}</td>
       `;
       tbody.appendChild(tr);
     });

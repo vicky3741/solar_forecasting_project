@@ -52,23 +52,34 @@ Plant location ─────► pvlib clear-sky physics ───────�
 6. **Enercast** — used strictly as a validation benchmark, never as a
    model input.
 
-Note: the LightGBM residual correction (below) is currently disabled —
-once the weather signal was added it stopped helping out-of-sample, so
-it is off pending re-evaluation.
-
 The final forecast per block = blended kt × clear-sky generation curve,
-clipped to plant capacity — then passed through a **residual correction**:
-a tiny LightGBM model trained on the backtest record of our own past
-mistakes (features: block hour, horizon, kt at run time, forecast value —
-all known at prediction time). Validated leave-one-day-out before
-shipping: +1.14 pct points improvement on unseen days (10/13 days
-helped). A stricter walk-forward test (each day corrected only by
-past days — `tests/test_walkforward_experiment.py`) showed the
-correction *hurts* until ~7-8 days of mistake history exist, then
-delivers +1.2 pct points — so the corrector must only be trusted
-once trained on at least a week of data (the shipped model is
-trained on 13 days). Retrain by rerunning
-`tests/test_residual_experiment.py` whenever new days arrive.
+clipped to plant capacity.
+
+### Residual correction (LightGBM) — currently DISABLED
+
+A tiny LightGBM model trained on the backtest record of our own past
+mistakes (features: block hour, horizon, kt at run time, forecast value
+— all known at prediction time).
+
+It is **not a competitor to the weather signal** — it is a correction
+layer applied *after* the forecast, whereas Open-Meteo is an input
+signal feeding *into* it. The two are different components, and the
+finding was that **the weather signal made the correction redundant**:
+
+- *Before* Open-Meteo existed: +1.14 pct points on unseen days
+  (leave-one-day-out, 10/13 days helped) — genuinely useful.
+- *After* Open-Meteo was added: fell to −0.37 pct points (only 4/13
+  days helped), so it was switched off.
+
+The interpretation: the residual corrector had been a crutch for the
+missing forward-looking signal. Once real forecasted weather supplied
+that information properly, re-correcting for it only added noise.
+
+A stricter walk-forward test (each day corrected only by past days —
+`tests/test_walkforward_experiment.py`) separately showed the
+correction *hurts* until ~7-8 days of mistake history exist. Re-evaluate
+by rerunning `tests/test_residual_experiment.py` if the base model
+changes; re-enable only if it helps out-of-sample again.
 
 ## Project structure
 

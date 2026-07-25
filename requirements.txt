@@ -13,3 +13,5 @@ lightgbm
 Pillow
 boto3
 requests
+google-genai            # vision provider 'gemini' (free tier)
+openai                  # vision provider 'openai' (ChatGPT, paid) - only needed if selected

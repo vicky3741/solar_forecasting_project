@@ -12,11 +12,17 @@ from pathlib import Path
 import json
 import cv2
 
+from modules.vision.frame_preprocessor import preprocess_frame
+
 
 class FrameExtractor:
 
-    def __init__(self, target_frames=10):
+    def __init__(self, target_frames=10, preprocess=False):
         self.target_frames = target_frames
+        # OpenCV cleanup (UI crop + contrast enhancement) before a frame
+        # is saved - off by default so existing behaviour/caches are
+        # unaffected; see modules/vision/frame_preprocessor.py.
+        self.preprocess = preprocess
 
     # --------------------------------------------------
 
@@ -81,8 +87,19 @@ class FrameExtractor:
         self,
         video_path,
         output_root,
-        target_frames=None
+        target_frames=None,
+        start_fraction=0.0,
+        end_fraction=1.0,
+        preprocess=None
     ):
+        """
+        start_fraction / end_fraction TRIM the video to a clean
+        window before sampling. Windy clips open with a few seconds
+        of map loading and later loop the timeline back to the
+        start; sampling only, say, 0.15-0.70 skips the loading and
+        stops before the loop, so the frames are one clean forward
+        sequence. Defaults (0.0-1.0) use the whole clip unchanged.
+        """
 
         info = self.get_video_information(video_path)
 
@@ -94,11 +111,18 @@ class FrameExtractor:
         if target_frames is None:
             target_frames = self.target_frames
 
+        if preprocess is None:
+            preprocess = self.preprocess
+
         actual_frames = self.count_readable_frames(video_path)
+
+        start_index = int(actual_frames * start_fraction)
+        end_index = int(actual_frames * end_fraction)
+        window = max(1, end_index - start_index)
 
         interval = max(
             1,
-            actual_frames // target_frames
+            window // target_frames
         )
         video = cv2.VideoCapture(str(video_path))
 
@@ -113,12 +137,17 @@ class FrameExtractor:
             if not success:
                 break
 
-            if frame_index % interval == 0:
+            in_window = start_index <= frame_index < end_index
+
+            if in_window and (frame_index - start_index) % interval == 0:
 
                 filename = (
                     output_folder /
                     f"frame_{saved:03d}.png"
                 )
+
+                if preprocess:
+                    frame = preprocess_frame(frame)
 
                 cv2.imwrite(str(filename), frame)
 

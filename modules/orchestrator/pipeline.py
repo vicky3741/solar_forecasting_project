@@ -35,6 +35,7 @@ from config.config import settings
 from modules.preprocessing.preprocess import DataPreprocessor
 from modules.forecasting.predictor import HybridPredictor
 from modules.forecasting.residual_correction import ResidualCorrector
+from modules.forecasting.case_based_correction import CaseBasedCorrector
 from modules.evaluation.evaluator import Evaluator
 from modules.vision.vision_module import VisionModule
 from modules.fusion.fusion import FeatureFusion
@@ -52,6 +53,7 @@ class Orchestrator:
         self.preprocessor = DataPreprocessor()
         self.predictor = HybridPredictor()
         self.corrector = ResidualCorrector()
+        self.case_corrector = CaseBasedCorrector()
         self.evaluator = Evaluator()
         self.vision = VisionModule()
         self.fusion = FeatureFusion()
@@ -62,7 +64,20 @@ class Orchestrator:
         self.auto_push = store.get("enabled", False) and store.get("auto_push", False)
 
         self.historical_folder = Path(settings["paths"]["historical_data"])
-        self.windy_folder = Path(settings["paths"]["windy_data"]) / "videos"
+
+        # Local video fallback, searched newest-folder-first when S3
+        # has nothing. Auto-captured clips now land in their own
+        # folder (windy_capture.video_dir), while the older
+        # hand-recorded July 9 clips stay in data/windy/videos - both
+        # are still valid sources, so both are searched.
+        capture_folder = Path(
+            settings.get("windy_capture", {}).get(
+                "video_dir", "data/windy/new_videos"
+            )
+        )
+        legacy_folder = Path(settings["paths"]["windy_data"]) / "videos"
+
+        self.windy_folders = [capture_folder, legacy_folder]
         self.vision_output_folder = "outputs/extracted_frames"
 
         self.forecasts_folder = Path(settings["outputs"]["forecasts"])
@@ -169,7 +184,17 @@ class Orchestrator:
                     f"S3 video fetch skipped ({error}) - trying local videos"
                 )
 
-        return self.vision.find_latest_video(self.windy_folder, run_time)
+        for folder in self.windy_folders:
+
+            if not folder.exists():
+                continue
+
+            video_path = self.vision.find_latest_video(folder, run_time)
+
+            if video_path is not None:
+                return video_path
+
+        return None
 
     # --------------------------------------------------
 
@@ -259,9 +284,22 @@ class Orchestrator:
             columns={"value_kw": "final_forecast_kw"}
         )
 
-        actual = dataframe[["timestamp", "active_power_kw"]]
+        actual_columns = ["timestamp", "active_power_kw"]
+        if "is_real_measurement" in dataframe.columns:
+            actual_columns.append("is_real_measurement")
 
-        _, report = self.evaluator.evaluate(forecast_blocks, actual)
+        actual = dataframe[actual_columns]
+
+        comparison, report = self.evaluator.evaluate(forecast_blocks, actual)
+
+        if comparison.empty:
+            self.logger.warning(
+                f"End-of-day validation skipped for {run_time.date()} - "
+                "no actual meter data for this day yet. The forecast is "
+                "saved; it just cannot be scored until the meter feed "
+                "catches up."
+            )
+            return None
 
         report_path = (
             self.reports_folder
@@ -308,6 +346,19 @@ class Orchestrator:
                 signals["kt_now"]
             )
             self.logger.info("Residual correction applied")
+
+        # Case-based correction (Kushal's idea): nudge by how similar
+        # past days actually turned out. Validated +0.47 pts on unseen
+        # days; only runs when enabled and the case store has enough
+        # history (see modules/forecasting/case_based_correction.py).
+        if self.case_corrector.available:
+            self.case_corrector.load()
+            forecast = self.case_corrector.apply(
+                forecast,
+                run_time,
+                signals["kt_now"]
+            )
+            self.logger.info("Case-based correction applied")
 
         run_label = run_time.strftime("%Y-%m-%d_%H-%M")
 
