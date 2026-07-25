@@ -14,11 +14,19 @@ by Windows Task Scheduler ("BrowserType.launch: Executable
 doesn't exist ...") while working fine from an interactive
 shell. Two defences are in place:
 
-  1. PLAYWRIGHT_BROWSERS_PATH is resolved and set explicitly
-     BEFORE playwright is imported. Task Scheduler hands the
-     process a trimmed environment, so leaving Playwright to
-     infer the browser location from LOCALAPPDATA made it
-     look in the wrong place.
+  1. On Windows only, PLAYWRIGHT_BROWSERS_PATH is resolved
+     and set explicitly BEFORE playwright is imported. Task
+     Scheduler hands the process a trimmed environment, so
+     leaving Playwright to infer the browser location from
+     LOCALAPPDATA made it look in the wrong place. This must
+     stay Windows-only: on 2026-07-25, deploying to an Ubuntu
+     EC2 server, an earlier unconditional version of this fix
+     built a literal "AppData/Local" path on Linux (there is
+     no LOCALAPPDATA there, so it fell back to a Windows-
+     shaped default), which broke a previously-working
+     Linux install. Off-Windows, Playwright's own default
+     resolution (~/.cache/ms-playwright and equivalents) is
+     correct and must be left alone.
   2. This file is runnable on its own
      (`python -m modules.capture.windy_capture`) so the
      scheduler can invoke each capture as a FRESH short-lived
@@ -37,11 +45,12 @@ from datetime import datetime
 from pathlib import Path
 
 # --- must happen before `playwright` is imported (see note above) ---
-_DEFAULT_BROWSERS_PATH = (
-    Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local"))
-    / "ms-playwright"
-)
-os.environ.setdefault("PLAYWRIGHT_BROWSERS_PATH", str(_DEFAULT_BROWSERS_PATH))
+if os.name == "nt":
+    _DEFAULT_BROWSERS_PATH = (
+        Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local"))
+        / "ms-playwright"
+    )
+    os.environ.setdefault("PLAYWRIGHT_BROWSERS_PATH", str(_DEFAULT_BROWSERS_PATH))
 
 from playwright.sync_api import sync_playwright  # noqa: E402
 
