@@ -514,6 +514,14 @@ class WindyCapture:
         the forecast's auto-pull already reads from
         (videos/<state>/<site>/<date>/<file>).
 
+        The clip is uploaded FIRST, before motion analysis and the
+        extra layer screenshots. Those steps are the memory-hungry
+        ones, and on 2026-07-26 optical flow was OOM-killed on the
+        server after a clip had been recorded but before it reached
+        the bucket - losing that scheduling slot's video entirely.
+        A process killed outright cannot run an exception handler,
+        so the only real protection is to bank the clip first.
+
         Returns (local_path, s3_key); s3_key is None when the
         upload was skipped or failed, so a capture is never
         lost just because the network was down.
@@ -523,10 +531,28 @@ class WindyCapture:
 
         local_path = self.capture(run_time)
 
+        date_str = run_time.strftime("%Y-%m-%d")
+        key = None
+
+        if self.upload_to_s3:
+            try:
+                if self.storage.is_available():
+                    key = f"{self.storage.video_prefix}/{date_str}/{local_path.name}"
+                    self.storage.upload(local_path, key)
+                else:
+                    self.logger.warning(
+                        "S3 not available - clip kept local only"
+                    )
+            except Exception as error:
+                key = None
+                self.logger.error(
+                    f"S3 upload failed ({error}) - clip kept locally at {local_path}"
+                )
+
+        # --- everything below is a bonus signal; the clip is safe ---
+
         _, motion_sidecar = self.analyze_motion(local_path)
 
-        # Extra layers are a bonus signal - never let a layer
-        # problem lose us the satellite clip we already have.
         try:
             layer_paths = self.capture_layers(run_time)
         except Exception as error:
@@ -536,20 +562,7 @@ class WindyCapture:
         if motion_sidecar is not None:
             layer_paths["_motion"] = motion_sidecar
 
-        if not self.upload_to_s3:
-            self.prune_local_files()
-            return local_path, None
-
-        try:
-            if not self.storage.is_available():
-                self.logger.warning("S3 not available - files kept local only")
-                return local_path, None
-
-            date_str = run_time.strftime("%Y-%m-%d")
-            key = f"{self.storage.video_prefix}/{date_str}/{local_path.name}"
-
-            self.storage.upload(local_path, key)
-
+        if self.upload_to_s3 and key is not None:
             for layer_path in layer_paths.values():
                 try:
                     self.storage.upload(
@@ -561,16 +574,11 @@ class WindyCapture:
                         f"Layer upload failed for {layer_path.name}: {error}"
                     )
 
-            # Safe to prune only now that this clip is in the bucket.
+        # Prune only what is already safely in the bucket.
+        if key is not None or not self.upload_to_s3:
             self.prune_local_files()
 
-            return local_path, key
-
-        except Exception as error:
-            self.logger.error(
-                f"S3 upload failed ({error}) - video kept locally at {local_path}"
-            )
-            return local_path, None
+        return local_path, key
 
 
 # --------------------------------------------------

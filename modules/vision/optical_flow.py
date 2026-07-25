@@ -127,8 +127,19 @@ class OpticalFlowAnalyzer:
 
     def read_frames(self, video_path):
         """
-        Uniformly sampled greyscale ROI frames from the
-        video, capped at max_frames.
+        Uniformly sampled greyscale ROI frames from the video,
+        capped at max_frames.
+
+        Frames are cropped and converted to grey AS THEY ARE READ,
+        and the buffer is halved whenever it grows too large, so
+        peak memory stays flat no matter how long the clip is.
+
+        An earlier version appended every full-colour frame to a
+        list before sampling. At 1280x720x3 bytes that is ~2 MB a
+        frame, so a routine 30-second 25 fps clip needed ~2 GB and
+        the OOM killer took the process out on the 900 MB EC2 box
+        (2026-07-26) - after the clip was recorded but before it
+        reached S3. Clip length must not drive memory here.
         """
 
         video = cv2.VideoCapture(str(video_path))
@@ -138,7 +149,15 @@ class OpticalFlowAnalyzer:
 
         fps = video.get(cv2.CAP_PROP_FPS) or 25.0
 
+        # Kept frames are `stride` source frames apart. Whenever the
+        # buffer exceeds the limit, every other frame is dropped and
+        # the stride doubles - so the retained frames stay uniformly
+        # spaced and the reported stride stays accurate.
+        buffer_limit = max(2, self.max_frames * 2)
+
         frames = []
+        stride = 1
+        index = 0
 
         while True:
             success, frame = video.read()
@@ -146,24 +165,25 @@ class OpticalFlowAnalyzer:
             if not success:
                 break
 
-            frames.append(frame)
+            if index % stride == 0:
+                frames.append(
+                    cv2.cvtColor(
+                        self.region_of_interest(frame), cv2.COLOR_BGR2GRAY
+                    )
+                )
+
+                if len(frames) > buffer_limit:
+                    frames = frames[::2]
+                    stride *= 2
+
+            index += 1
 
         video.release()
 
         if not frames:
             raise ValueError(f"No readable frames in {video_path}")
 
-        # Uniformly sample down to max_frames so long clips
-        # cost the same as short ones.
-        step = max(1, len(frames) // self.max_frames)
-        sampled = frames[::step][:self.max_frames]
-
-        grey = [
-            cv2.cvtColor(self.region_of_interest(f), cv2.COLOR_BGR2GRAY)
-            for f in sampled
-        ]
-
-        return grey, fps, step
+        return frames[:self.max_frames], fps, stride
 
     # --------------------------------------------------
 
