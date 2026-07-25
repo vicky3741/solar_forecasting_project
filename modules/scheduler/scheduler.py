@@ -18,9 +18,20 @@ Task Scheduler process while working fine standalone, so
 each capture now gets a clean process and a hard timeout -
 a hung or broken capture can never stall or kill the
 scheduler, and the forecast still runs either way.
+
+The Orchestrator is likewise built PER RUN, not once at
+startup. Constructing it loads torch and the Chronos
+weights (~420 MB), and holding that resident between runs
+left too little headroom on the ~900 MB EC2 box for
+Chromium to record a clip - the capture was OOM-killed
+mid-recording (2026-07-26). Building it per run keeps this
+process near-idle for the 23 hours a day it is waiting, and
+means capture and forecast never hold their peak memory at
+the same time.
 =========================================================
 """
 
+import gc
 import socket
 import subprocess
 import sys
@@ -73,8 +84,6 @@ def acquire_single_instance_lock(port):
 class Scheduler:
 
     def __init__(self):
-
-        self.orchestrator = Orchestrator()
 
         self.logger = get_logger()
 
@@ -137,13 +146,21 @@ class Scheduler:
 
         self.logger.info("Scheduled trigger fired")
 
+        # Capture first, in its own process, so Chromium has the
+        # machine to itself before the forecast loads Chronos.
         self.capture_video()
 
         try:
-            self.orchestrator.run()
+            # Built here rather than in __init__ (see module docstring):
+            # the ~420 MB of torch/Chronos weights are released again
+            # once the run returns, instead of sitting resident all day.
+            Orchestrator().run()
 
         except Exception as error:
             self.logger.error(f"Scheduled run failed: {error}")
+
+        finally:
+            gc.collect()
 
     # --------------------------------------------------
 
