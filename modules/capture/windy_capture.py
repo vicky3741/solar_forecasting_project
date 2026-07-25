@@ -39,9 +39,11 @@ shell. Two defences are in place:
 
 import json
 import os
+import shutil
+import subprocess
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 # --- must happen before `playwright` is imported (see note above) ---
@@ -101,6 +103,15 @@ class WindyCapture:
             capture.get("play_button_position", [31, 665])
         )
 
+        # Playwright's raw WebM is ~56 MB for a 20s 720p clip. Seven of
+        # those a day fills the EC2 box's 6.7 GB disk in under two days
+        # and takes the whole automation down with it, so each clip is
+        # re-encoded to H.264 (same resolution, ~20x smaller) and old
+        # local files are pruned once they are safely in S3.
+        self.compress = capture.get("compress", True)
+        self.compress_crf = capture.get("compress_crf", 30)
+        self.local_retention_days = capture.get("local_retention_days", 3)
+
         self.storage = S3Storage()
 
     # --------------------------------------------------
@@ -150,6 +161,22 @@ class WindyCapture:
 
     # --------------------------------------------------
 
+    # Chromium defaults assume a desktop's worth of memory. The EC2
+    # box has ~900 MB of RAM, and on 2026-07-26 a capture there died
+    # with "Mouse.click: Target crashed" - the renderer being OOM-killed
+    # mid-recording. That left a 14-minute, 55 MB clip behind (Playwright
+    # keeps recording while the retry runs), which is what nearly filled
+    # the disk. These flags cut the renderer's footprint; the big one is
+    # --disable-dev-shm-usage, since /dev/shm here is RAM-backed and
+    # small, so Chromium exhausting it takes the tab down.
+    LOW_MEMORY_BROWSER_ARGS = [
+        "--disable-dev-shm-usage",
+        "--disable-gpu",
+        "--disable-software-rasterizer",
+        "--disable-extensions",
+        "--no-sandbox",
+    ]
+
     # Plant tag matching the S3 site convention (inputs/.../SIRMOUR).
     PLANT_TAG = "SIRMOUR"
 
@@ -166,6 +193,130 @@ class WindyCapture:
     def output_filename(self, run_time):
 
         return f"{self.name_stem(run_time)}.webm"
+
+    # --------------------------------------------------
+
+    def compress_video(self, video_path):
+        """
+        Re-encodes a recorded clip to H.264 MP4 at the same
+        resolution, which keeps the cloud detail the vision models
+        read while cutting the file from ~56 MB to a few MB.
+
+        Returns the new path, or the original untouched path if
+        ffmpeg is missing or fails - a bulky clip is always better
+        than no clip.
+        """
+
+        video_path = Path(video_path)
+
+        if not self.compress:
+            return video_path
+
+        if shutil.which("ffmpeg") is None:
+            self.logger.warning(
+                "ffmpeg not found - keeping the raw clip uncompressed"
+            )
+            return video_path
+
+        compressed = video_path.with_suffix(".mp4")
+
+        try:
+            result = subprocess.run(
+                [
+                    "ffmpeg", "-y", "-loglevel", "error",
+                    "-i", str(video_path),
+                    "-c:v", "libx264",
+                    "-crf", str(self.compress_crf),
+                    "-preset", "veryfast",
+                    "-pix_fmt", "yuv420p",
+                    "-an",
+                    str(compressed),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=180,
+            )
+
+            if result.returncode != 0 or not compressed.exists():
+                self.logger.warning(
+                    f"ffmpeg compression failed ({result.stderr.strip()[-200:]}) "
+                    "- keeping the raw clip"
+                )
+                compressed.unlink(missing_ok=True)
+                return video_path
+
+            before_mb = video_path.stat().st_size / 1e6
+            after_mb = compressed.stat().st_size / 1e6
+
+            video_path.unlink(missing_ok=True)
+
+            self.logger.info(
+                f"Compressed {before_mb:.0f} MB -> {after_mb:.1f} MB: "
+                f"{compressed.name}"
+            )
+
+            return compressed
+
+        except Exception as error:
+            self.logger.warning(
+                f"ffmpeg compression skipped ({error}) - keeping the raw clip"
+            )
+            compressed.unlink(missing_ok=True)
+            return video_path
+
+    # --------------------------------------------------
+
+    def prune_local_files(self):
+        """
+        Deletes local clips, screenshots and cached S3 videos older
+        than `local_retention_days`. Everything is already in S3, so
+        the local copies exist only as a same-day fallback for when
+        the bucket is unreachable - keeping them forever is what
+        would eventually fill the disk and stop the automation.
+        """
+
+        if not self.local_retention_days:
+            return 0
+
+        cutoff = datetime.now() - timedelta(days=self.local_retention_days)
+
+        folders = [self.video_dir, self.screenshot_dir]
+
+        cache_dir = Path(self.storage.video_cache)
+        if cache_dir.exists():
+            folders.append(cache_dir)
+
+        removed = 0
+        freed = 0
+
+        for folder in folders:
+
+            if not folder.exists():
+                continue
+
+            for path in folder.iterdir():
+
+                if not path.is_file():
+                    continue
+
+                try:
+                    if datetime.fromtimestamp(path.stat().st_mtime) >= cutoff:
+                        continue
+
+                    freed += path.stat().st_size
+                    path.unlink()
+                    removed += 1
+
+                except OSError as error:
+                    self.logger.warning(f"Could not remove {path.name}: {error}")
+
+        if removed:
+            self.logger.info(
+                f"Pruned {removed} local file(s) older than "
+                f"{self.local_retention_days} days, freeing {freed/1e6:.0f} MB"
+            )
+
+        return removed
 
     # --------------------------------------------------
 
@@ -201,7 +352,10 @@ class WindyCapture:
 
         with sync_playwright() as playwright:
 
-            browser = playwright.chromium.launch(headless=self.headless)
+            browser = playwright.chromium.launch(
+                headless=self.headless,
+                args=self.LOW_MEMORY_BROWSER_ARGS
+            )
 
             context = browser.new_context(
                 **self.context_options(
@@ -237,6 +391,15 @@ class WindyCapture:
         final_path = self.video_dir / self.output_filename(run_time)
 
         Path(video_path).replace(final_path)
+
+        # A crashed first attempt leaves its own part-recorded
+        # "page@<hash>.webm" behind. Those are never named by
+        # output_filename, so nothing else ever cleans them up.
+        for orphan in self.video_dir.glob("page@*.webm"):
+            orphan.unlink(missing_ok=True)
+            self.logger.info(f"Removed orphaned recording: {orphan.name}")
+
+        final_path = self.compress_video(final_path)
 
         self.logger.info(f"Windy capture saved: {final_path}")
 
@@ -310,7 +473,10 @@ class WindyCapture:
 
         with sync_playwright() as playwright:
 
-            browser = playwright.chromium.launch(headless=self.headless)
+            browser = playwright.chromium.launch(
+                headless=self.headless,
+                args=self.LOW_MEMORY_BROWSER_ARGS
+            )
             context = browser.new_context(**self.context_options())
             page = context.new_page()
 
@@ -371,6 +537,7 @@ class WindyCapture:
             layer_paths["_motion"] = motion_sidecar
 
         if not self.upload_to_s3:
+            self.prune_local_files()
             return local_path, None
 
         try:
@@ -393,6 +560,9 @@ class WindyCapture:
                     self.logger.warning(
                         f"Layer upload failed for {layer_path.name}: {error}"
                     )
+
+            # Safe to prune only now that this clip is in the bucket.
+            self.prune_local_files()
 
             return local_path, key
 

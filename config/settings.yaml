@@ -121,6 +121,16 @@ windy_capture:
   # hand-recorded July 9 clips still in data/windy/videos.
   video_dir: data/windy/new_videos
   upload_to_s3: true       # push each clip to storage.video_prefix so the forecast can pull it back
+  # A HEALTHY capture is only ~2 MB. The 55 MB clip found on the server on
+  # 2026-07-26 was not normal encoding - Chromium had been OOM-killed and
+  # Playwright kept recording through the retry, producing 14 minutes of
+  # video. The fix is LOW_MEMORY_BROWSER_ARGS + swap, not compression, so
+  # compression stays off: re-encoding cost 3+ minutes of CPU per clip on a
+  # t3.micro, and the bundled ffmpeg has no H.264 encoder anyway. Turn it on
+  # only if clips are genuinely large once captures are healthy.
+  compress: false
+  compress_crf: 30         # 0=lossless, 51=worst. Only used when compress: true.
+  local_retention_days: 3  # local copies are only an S3-unreachable fallback; the bucket is the archive
   subprocess_timeout_seconds: 300   # hard kill for one capture; must exceed capture_seconds plus browser startup plus the layer screenshots
   # Premium session saved by `python -m modules.capture.windy_login` (one-time,
   # interactive). Absent = free public embed, which still works. MUST stay
