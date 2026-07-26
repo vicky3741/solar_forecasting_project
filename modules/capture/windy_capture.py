@@ -399,6 +399,19 @@ class WindyCapture:
             orphan.unlink(missing_ok=True)
             self.logger.info(f"Removed orphaned recording: {orphan.name}")
 
+        # A healthy 20-30s clip is a few MB. When the disk filled on
+        # 2026-07-26, Playwright "recorded" 0-byte files and they were
+        # uploaded to S3 as if they were real - five scheduling slots
+        # of junk. Fail loudly instead, so the retry (or the log) makes
+        # the problem visible and nothing empty ever reaches the bucket.
+        size = final_path.stat().st_size
+        if size < 100_000:
+            final_path.unlink(missing_ok=True)
+            raise RuntimeError(
+                f"Recording came out at {size} bytes - disk full or "
+                "recording failure; refusing to keep/upload it"
+            )
+
         final_path = self.compress_video(final_path)
 
         self.logger.info(f"Windy capture saved: {final_path}")
