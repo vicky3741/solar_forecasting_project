@@ -260,6 +260,57 @@ class S3Storage:
 
     # --------------------------------------------------
 
+    def sweep_junk_videos(self, date_str, own_prefix="SIRMOUR_"):
+        """
+        End-of-upload hygiene for one day's video folder, run after
+        each capture (the user asked for junk to be checked and
+        removed regularly, 2026-07-26):
+
+          * deletes 0-byte objects among OUR OWN uploads only - other
+            teams' files are never touched, even broken ones, since
+            their pipelines may depend on them;
+          * logs how many clips each team has put in today's folder,
+            so a new duplicate pattern (e.g. another team starting the
+            same automation) is visible in the log the day it starts.
+
+        Never raises - hygiene must not fail a capture run.
+        """
+
+        try:
+            prefix = f"{self.video_prefix}/{date_str}"
+
+            own, other = 0, 0
+
+            for obj in self.list_objects_meta(prefix):
+
+                filename = obj["Key"].split("/")[-1]
+
+                if not filename.lower().endswith(_VIDEO_EXTENSIONS):
+                    continue
+
+                if filename.startswith(own_prefix):
+                    if obj["Size"] == 0:
+                        self.client.delete_object(
+                            Bucket=self.bucket, Key=obj["Key"]
+                        )
+                        self.logger.warning(
+                            f"Deleted our empty junk upload: {obj['Key']}"
+                        )
+                    else:
+                        own += 1
+                else:
+                    other += 1
+
+            self.logger.info(
+                f"Bucket check {date_str}: {own} clip(s) ours, "
+                f"{other} from other teams"
+            )
+
+        except Exception as error:
+            self.logger.warning(f"Bucket junk sweep skipped ({error})")
+
+    # --------------------------------------------------
+
     @staticmethod
     def parse_video_time(key):
         """

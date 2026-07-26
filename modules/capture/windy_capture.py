@@ -591,6 +591,11 @@ class WindyCapture:
         if key is not None or not self.upload_to_s3:
             self.prune_local_files()
 
+        # Bucket hygiene: remove any 0-byte junk of ours and log how
+        # many clips each team put in today's folder (duplicate watch).
+        if key is not None:
+            self.storage.sweep_junk_videos(date_str)
+
         return local_path, key
 
 
