@@ -64,6 +64,19 @@ class OpenMeteoClient:
             "single_run_forecast_days", 3
         )
 
+        # Walk-forward bias correction (validated 2026-07-27, see
+        # tests/test_weather_bias_experiment.py and the audit that
+        # motivated it: Open-Meteo over-forecast sunlight here on 18
+        # of 21 days, +49% during the monsoon week).
+        bias = weather.get("bias_correction", {})
+        self.bias_enabled = bias.get("enabled", False)
+        self.bias_window_days = bias.get("window_days", 5)
+        self.bias_clip = tuple(bias.get("clip", [0.55, 1.15]))
+        self.bias_min_days = bias.get("min_days", 3)
+        self.bias_lookback_days = bias.get("lookback_days", 10)
+
+        self._bias_ratio_cache = {}   # date -> ratio or None (memoized)
+
     # --------------------------------------------------
 
     def _cache_path(self, date_str, model_run=None):
@@ -181,6 +194,86 @@ class OpenMeteoClient:
         except Exception as error:
             self.logger.warning(f"Open-Meteo request failed for {date_str}: {error}")
             return None
+
+    # --------------------------------------------------
+
+    def daily_bias_ratio(self, real_data, day):
+        """
+        Forecast/actual sunlight ratio for one finished day: the
+        archived 06:45 forecast for that day vs the plant's measured
+        GHI over its real daylight blocks. 1.0 = honest, 1.5 = the
+        forecast promised 50% more sun than arrived. None when either
+        side is missing. Memoized - a finished day's ratio never
+        changes.
+        """
+
+        if day in self._bias_ratio_cache:
+            return self._bias_ratio_cache[day]
+
+        ratio = None
+
+        group = real_data[real_data["timestamp"].dt.date == day]
+        daylight = group[group["ghi_w_m2"] > 30].dropna(subset=["ghi_w_m2"])
+
+        if len(daylight) >= 15:
+            as_of = pd.Timestamp(day) + pd.Timedelta(hours=6, minutes=45)
+            forecast = self.forecast_ghi_at(daylight["timestamp"], as_of=as_of)
+
+            if forecast is not None:
+                actual = daylight["ghi_w_m2"].to_numpy()
+                valid = ~np.isnan(forecast)
+
+                if valid.sum() >= 15 and actual[valid].sum() > 0:
+                    ratio = float(forecast[valid].sum() / actual[valid].sum())
+
+        self._bias_ratio_cache[day] = ratio
+
+        return ratio
+
+    # --------------------------------------------------
+
+    def bias_factor(self, dataframe, run_time):
+        """
+        Walk-forward correction for today's weather signal: the
+        inverse of the MEDIAN forecast/actual bias over the last
+        `bias_window_days` finished days (median so one freak day
+        cannot own the factor; clipped so the correction can never
+        run away).
+
+        Validated walk-forward on 16 unseen days (2026-07-27):
+        +0.76 pts overall, +1.23 pts on monsoon days, 11/16 days
+        better. Uses only information available at run_time.
+        """
+
+        if not self.bias_enabled:
+            return 1.0
+
+        if "ghi_w_m2" not in dataframe.columns:
+            return 1.0
+
+        real = dataframe
+        if "is_real_measurement" in real.columns:
+            real = real[real["is_real_measurement"].fillna(False)]
+
+        today = pd.Timestamp(run_time).date()
+        start = today - pd.Timedelta(days=self.bias_lookback_days)
+
+        prior_days = sorted({
+            d for d in real["timestamp"].dt.date
+            if start <= d < today
+        })
+
+        ratios = [
+            r for d in prior_days
+            if (r := self.daily_bias_ratio(real, d)) is not None
+        ]
+
+        if len(ratios) < self.bias_min_days:
+            return 1.0
+
+        recent = ratios[-self.bias_window_days:]
+
+        return float(np.clip(1.0 / np.median(recent), *self.bias_clip))
 
     # --------------------------------------------------
 

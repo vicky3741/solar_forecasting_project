@@ -105,6 +105,21 @@ weather:
   # would have been available at least this long before the simulated run.
   historical_availability_lag_minutes: 120
   single_run_forecast_days: 3
+  # ADDED 2026-07-27: walk-forward bias correction. The audit found Open-Meteo
+  # over-forecast sunlight at Sirmour on 18 of 21 days (+10% early July, +49%
+  # during the monsoon week Jul 19-26) - and at 65% blend weight that optimism
+  # became our over-forecast. Each run scales the weather signal by the inverse
+  # of the MEDIAN forecast/actual bias over the last `window_days` finished
+  # days (measured against the plant's own GHI sensor, archived forecasts only,
+  # no lookahead). Validated walk-forward on 16 unseen days: +0.76 pts overall,
+  # +1.23 pts on monsoon days, 11/16 days better (biggest single gain since the
+  # weather signal itself). See tests/test_weather_bias_experiment.py.
+  bias_correction:
+    enabled: true
+    window_days: 5           # how many recent finished days teach the factor
+    clip: [0.55, 1.15]       # never discount below ~half, never boost above +15%
+    min_days: 3              # stays off until this many days of bias history exist
+    lookback_days: 10        # how far back to look for finished days
 
 # Automated Windy satellite capture. NOTE: Team 3's own feed already
 # uploads Windy videos to the same bucket roughly every 20 minutes;
