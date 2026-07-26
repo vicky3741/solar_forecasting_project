@@ -317,7 +317,16 @@ class Orchestrator:
     def run(self, run_time=None):
 
         if run_time is None:
-            run_time = pd.Timestamp.now().floor("min")
+            # Snap to the 15-minute grid, not just the minute. The
+            # scheduler fires at 06:45 but the capture takes ~1 min,
+            # so the orchestrator actually starts at ~06:46 - and
+            # flooring to the minute put every forecast block at
+            # :01/:16/:31/:46. Those timestamps never match the meter
+            # data's :00/:15/:30/:45 grid, so the 2026-07-26 server
+            # run produced a forecast with ZERO gradeable blocks.
+            # Flooring to 15 min anchors the run at its scheduled
+            # block boundary and keeps every block on the grid.
+            run_time = pd.Timestamp.now().floor("15min")
 
         self.logger.info(f"Starting forecast run for {run_time}")
 
