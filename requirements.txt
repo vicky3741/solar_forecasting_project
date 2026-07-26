@@ -16,3 +16,5 @@ requests
 google-genai            # vision provider 'gemini' (free tier)
 openai                  # vision provider 'openai' (ChatGPT, paid) - only needed if selected
 opencv-python-headless  # frame extraction + optical flow; headless variant (no GUI libs needed on a server)
+ecmwf-opendata          # optional: pull the forecast straight from ECMWF, no middleman (weather.ecmwf_direct)
+eccodes                 # GRIB decoder for the above; only imported when ecmwf_direct is enabled

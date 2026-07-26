@@ -125,6 +125,25 @@ weather:
   # no lookahead). Validated walk-forward on 16 unseen days: +0.76 pts overall,
   # +1.23 pts on monsoon days, 11/16 days better (biggest single gain since the
   # weather signal itself). See tests/test_weather_bias_experiment.py.
+  # Take the forecast STRAIGHT from ECMWF's own open-data servers, with no
+  # middleman (modules/weather/ecmwf_direct.py). Built 2026-07-27 at the
+  # sub-mentor's request to move off Open-Meteo. Same physics we already use
+  # (weather.model above is ECMWF), and verified to track the Open-Meteo
+  # delivery within ~36 W/m2 on a same-day horizon.
+  #
+  # OFF by default, deliberately. ECMWF's open feed keeps only the last few
+  # days of runs, so this source CANNOT be backtested - there is no honest way
+  # to prove it beats the current path before switching. It is also coarser
+  # (3-hourly steps vs Open-Meteo's hourly), which matters most around
+  # sunrise/sunset. Turn on to make ECMWF the live source; Open-Meteo stays
+  # installed as the automatic fallback AND remains the archive the bias
+  # correction measures itself against.
+  ecmwf_direct:
+    enabled: false
+    model: ifs             # ifs = the physics model that won our bake-off; aifs = the AI one (lost through the full blend)
+    stream: oper
+    forecast_hours: 48     # a live run only ever needs today; 48h covers it with room to spare
+    cache_dir: data/weather/ecmwf_direct
   bias_correction:
     enabled: true
     window_days: 5           # how many recent finished days teach the factor

@@ -51,17 +51,31 @@ from config.config import settings
 from modules.forecasting.chronos_model import ChronosModel
 from modules.forecasting.clearsky import ClearSkyModel
 from modules.weather.open_meteo import OpenMeteoClient
+from utils.logger import get_logger
 
 
 class HybridPredictor:
 
     def __init__(self):
 
+        self.logger = get_logger()
+
         self.chronos = ChronosModel()
 
         self.clearsky = ClearSkyModel()
 
         self.weather = OpenMeteoClient()
+
+        # Optional: take the forecast straight from ECMWF's own servers
+        # instead of via Open-Meteo (see modules/weather/ecmwf_direct.py).
+        # Disabled by default - it CANNOT be backtested (ECMWF keeps only
+        # a few days of runs), so it ships behind a switch with automatic
+        # fallback rather than as an unvalidated swap. The bias correction
+        # always reads Open-Meteo's archive, which is what makes it
+        # measurable at all.
+        from modules.weather.ecmwf_direct import ECMWFDirectClient
+
+        self.ecmwf_direct = ECMWFDirectClient()
 
         self.capacity_kw = settings["plant"]["capacity_mw"] * 1000
 
@@ -338,13 +352,35 @@ class HybridPredictor:
         if not self.weather.enabled:
             return None
 
-        try:
-            weather_ghi = self.weather.forecast_ghi_at(
-                forecast_timestamps,
-                as_of=as_of
-            )
-        except Exception:
-            weather_ghi = None
+        weather_ghi = None
+
+        # Preferred source first (ECMWF direct, when switched on), then
+        # Open-Meteo. Either failing degrades to the other rather than
+        # losing the weather signal, which carries 65% of the blend.
+        if self.ecmwf_direct.enabled:
+            try:
+                weather_ghi = self.ecmwf_direct.forecast_ghi_at(
+                    forecast_timestamps,
+                    as_of=as_of
+                )
+            except Exception as error:
+                self.logger.warning(
+                    f"ECMWF direct failed ({error}) - falling back to Open-Meteo"
+                )
+
+            if weather_ghi is None:
+                self.logger.info(
+                    "ECMWF direct returned nothing - using Open-Meteo for this run"
+                )
+
+        if weather_ghi is None:
+            try:
+                weather_ghi = self.weather.forecast_ghi_at(
+                    forecast_timestamps,
+                    as_of=as_of
+                )
+            except Exception:
+                weather_ghi = None
 
         if weather_ghi is None:
             return None
