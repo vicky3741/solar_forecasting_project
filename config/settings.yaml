@@ -131,13 +131,22 @@ weather:
   # (weather.model above is ECMWF), and verified to track the Open-Meteo
   # delivery within ~36 W/m2 on a same-day horizon.
   #
-  # OFF by default, deliberately. ECMWF's open feed keeps only the last few
-  # days of runs, so this source CANNOT be backtested - there is no honest way
-  # to prove it beats the current path before switching. It is also coarser
-  # (3-hourly steps vs Open-Meteo's hourly), which matters most around
-  # sunrise/sunset. Turn on to make ECMWF the live source; Open-Meteo stays
-  # installed as the automatic fallback AND remains the archive the bias
-  # correction measures itself against.
+  # DECISION 2026-07-27 (Vikrant, after reviewing the trade-off): keep this
+  # OFF and keep Open-Meteo, deliberately and for a specific reason - not as
+  # an unfinished default. Open-Meteo is retained purely as the DELIVERY layer
+  # for ECMWF's forecast, because it provides two things ECMWF's own feed does
+  # not:
+  #   1. An ARCHIVE of past forecasts. ECMWF's open feed keeps only the last
+  #      few days, so going direct would end our ability to ask "would this
+  #      change have helped last month?" - the exact test that produced the
+  #      bias correction (+0.76 pts) and the ECMWF switch (+0.24 pts), taking
+  #      deviation from 7.64% to 6.64%. Losing it means never proving an
+  #      improvement again.
+  #   2. HOURLY resolution. ECMWF's raw open feed is 3-hourly, which is
+  #      coarser around sunrise/sunset where the solar curve moves fastest.
+  # The direct client stays built, tested and one line from active, so the
+  # middleman can be dropped whenever that trade-off changes. When enabled it
+  # is tried first and falls back to Open-Meteo automatically.
   ecmwf_direct:
     enabled: false
     model: ifs             # ifs = the physics model that won our bake-off; aifs = the AI one (lost through the full blend)
