@@ -98,12 +98,23 @@ clearsky:
 weather:
   enabled: true
   provider: open_meteo     # free, no API key; forward-looking forecasted GHI
+  # SWITCHED 2026-07-27 from best_match (auto) to ECMWF after a 21-day
+  # bake-off of 7 models + the satellite feed against the plant's own GHI
+  # sensor: ECMWF MAE 107.7 W/m2 vs 118.9 for best_match (~10% better), and
+  # best in the monsoon week too. Full-blend walk-forward confirmed it:
+  # corrected deviation 6.64% vs 6.88%, monsoon 7.50% vs 7.91%, and the
+  # bias correction helped 8/8 monsoon days under ECMWF (6/8 before) - its
+  # bias is steadier, so the correction has an easier job. Empty = best_match.
+  model: ecmwf_ifs025
   weather_weight: 0.65     # TUNED + VALIDATED 2026-07-21: sweep found a flat optimum plateau 0.6-0.8 (dev ~7.28-7.31%); 0.65 = stable middle. Baseline (weather off) was 8.56% -> -1.2 pts. Leave-one-day-out: weather helped 11/13 unseen days. Weight 1.0 (weather only) was WORSE (7.54%), confirming the blend beats the raw forecast. Re-tune as more days arrive.
   cache_dir: data/weather/openmeteo_cache
   timeout_seconds: 25
   # Historical comparisons use the latest archived 6-hourly model run that
   # would have been available at least this long before the simulated run.
-  historical_availability_lag_minutes: 120
+  # Raised 120 -> 420 with the ECMWF switch: its open-data runs arrive ~7h
+  # after cycle start, and assuming them sooner would be lookahead. (Only
+  # affects backtests; live runs always use the live endpoint.)
+  historical_availability_lag_minutes: 420
   single_run_forecast_days: 3
   # ADDED 2026-07-27: walk-forward bias correction. The audit found Open-Meteo
   # over-forecast sunlight at Sirmour on 18 of 21 days (+10% early July, +49%

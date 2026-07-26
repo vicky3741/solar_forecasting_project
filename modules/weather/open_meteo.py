@@ -52,6 +52,12 @@ class OpenMeteoClient:
         weather = settings.get("weather", {})
         self.enabled = weather.get("enabled", False)
         self.weather_weight = weather.get("weather_weight", 0.0)
+        # Which forecast model Open-Meteo serves us. Empty/None = its
+        # "best match" auto-choice. The 21-day bake-off against the
+        # plant's own sensor (2026-07-27) ranked ECMWF (ecmwf_ifs025)
+        # best: MAE 107.7 vs 118.9 W/m2 for best_match, and best in the
+        # monsoon week too. Set via weather.model in settings.yaml.
+        self.model = weather.get("model") or None
         self.cache_dir = Path(weather.get("cache_dir", "data/weather/openmeteo_cache"))
         self.timeout = weather.get("timeout_seconds", 25)
         # A forecast model run is not usable at the exact instant it starts.
@@ -80,11 +86,15 @@ class OpenMeteoClient:
     # --------------------------------------------------
 
     def _cache_path(self, date_str, model_run=None):
+        # Model-specific caches must never collide with the old
+        # best_match ones, so the model name joins the filename.
+        model_tag = f"__{self.model}" if self.model else ""
+
         if model_run is None:
-            return self.cache_dir / f"{date_str}.json"
+            return self.cache_dir / f"{date_str}{model_tag}.json"
 
         label = pd.Timestamp(model_run).strftime("%Y%m%dT%H%M")
-        return self.cache_dir / f"{date_str}__run_{label}.json"
+        return self.cache_dir / f"{date_str}{model_tag}__run_{label}.json"
 
     # --------------------------------------------------
 
@@ -172,6 +182,9 @@ class OpenMeteoClient:
             "hourly": "shortwave_radiation,cloud_cover,temperature_2m",
             "timezone": self.timezone,
         }
+
+        if self.model:
+            params["models"] = self.model
 
         if model_run is None:
             # Today/future: use the currently available live forecast.
