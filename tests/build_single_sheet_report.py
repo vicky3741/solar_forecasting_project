@@ -42,7 +42,6 @@ OUT = Path(f"outputs/reports/Schedule_{DAY}_single_sheet.xlsx")
 
 CAPACITY_MW = 5.1
 PLANT = "Sirmour Solar Plant"
-BLOCK_HOURS = 0.25
 
 FONT = "Arial"
 NAVY = "1F3864"
@@ -102,8 +101,7 @@ def main():
     ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=total_cols)
     c = ws.cell(row=1, column=1,
                 value=f"{PLANT} - Reconstructed Day Schedule - {DAY}   "
-                      f"(all power in MW, energy in MWh, installed capacity "
-                      f"{CAPACITY_MW} MW)")
+                      f"(all values in MW, installed capacity {CAPACITY_MW} MW)")
     c.font = F_TITLE
     c.alignment = CENTER
     ws.row_dimensions[1].height = 20
@@ -182,26 +180,76 @@ def main():
 
     last_row = start + len(blocks) - 1
 
-    # ---------------- accuracy, computed here (no formulas) ----------------
+    # ---------------- totals, computed here (no formulas) ----------------
+    # Everything is reported in MW, per Vikrant's instruction. The totals
+    # are sums of the 15-minute block values over the SAME set of blocks
+    # (the ones with a real meter reading), so predicted and actual are
+    # directly comparable.
     scored = schedule[schedule["actual_is_real"] & schedule["actual_mw"].notna()]
 
-    predicted_energy = float(scored["scheduled_mw"].sum() * BLOCK_HOURS)
-    actual_energy = float(scored["actual_mw"].sum() * BLOCK_HOURS)
-    net_error = predicted_energy - actual_energy
-    abs_error_energy = float(scored["error_mw"].abs().sum() * BLOCK_HOURS)
+    total_predicted = float(scored["scheduled_mw"].sum())
+    total_actual = float(scored["actual_mw"].sum())
+    total_error = total_predicted - total_actual
+    total_abs_error = float(scored["error_mw"].abs().sum())
     mae = float(scored["error_mw"].abs().mean())
     rmse = float(np.sqrt((scored["error_mw"] ** 2).mean()))
     deviation = mae / CAPACITY_MW * 100
 
-    mrow = last_row + 2
+    # ---------------- TOTAL row, closing the block table ----------------
+    trow = last_row + 1
+
+    tc = ws.cell(row=trow, column=1, value="TOTAL")
+    tc.font = F_HEAD
+    tc.fill = FILL_HEAD
+    tc.alignment = CENTER
+    tc.border = BOX
+
+    tc = ws.cell(row=trow, column=2, value=f"{len(scored)} blk")
+    tc.font = F_HEAD
+    tc.fill = FILL_HEAD
+    tc.alignment = CENTER
+    tc.border = BOX
+
+    # Run columns are left blank: each run covers a different number of
+    # blocks, so their column sums would not be comparable with each
+    # other or with the final schedule.
+    for i in range(n_run):
+        cell = ws.cell(row=trow, column=first_run_col + i)
+        cell.fill = FILL_HEAD
+        cell.border = BOX
+
+    for col, value in (
+        (col_final, total_predicted),
+        (col_actual, total_actual),
+        (col_error, total_error),
+    ):
+        cell = ws.cell(row=trow, column=col, value=round(value, 4))
+        cell.number_format = "0.0000;-0.0000"
+        cell.font = F_HEAD
+        cell.fill = FILL_HEAD
+        cell.alignment = CENTER
+        cell.border = BOX
+
+    cell = ws.cell(row=trow, column=col_src, value="MW")
+    cell.font = F_HEAD
+    cell.fill = FILL_HEAD
+    cell.alignment = CENTER
+    cell.border = BOX
+
+    ws.cell(row=trow + 1, column=1,
+            value="TOTAL sums only the blocks that have a real meter reading, so predicted "
+                  "and actual cover exactly the same blocks.").font = F_NOTE
+
+    mrow = trow + 3
     ws.cell(row=mrow, column=1, value="ACCURACY vs ACTUAL METER DATA").font = F_SECTION
 
     rows = [
         ("Blocks scored (real meter readings)", len(scored), "0"),
-        ("Total predicted energy (MWh)", round(predicted_energy, 3), "0.000"),
-        ("Total actual energy (MWh)", round(actual_energy, 3), "0.000"),
-        ("Total error - predicted minus actual (MWh)", round(net_error, 3), "+0.000;-0.000"),
-        ("Total absolute error (MWh)", round(abs_error_energy, 3), "0.000"),
+        ("Total predicted (MW)", round(total_predicted, 4), "0.0000"),
+        ("Total actual (MW)", round(total_actual, 4), "0.0000"),
+        ("Total error - predicted minus actual (MW)", round(total_error, 4),
+         "+0.0000;-0.0000"),
+        ("Total absolute error (MW)", round(total_abs_error, 4), "0.0000"),
         ("Average percentage deviation (%)", round(deviation, 2), "0.00"),
         ("Mean absolute error (MW)", round(mae, 4), "0.0000"),
         ("Root mean squared error (MW)", round(rmse, 4), "0.0000"),
@@ -229,7 +277,9 @@ def main():
         ("Orange rows", "No measured meter reading - excluded from every figure above."),
         ("Deviation", f"Mean absolute error as a percentage of the {CAPACITY_MW} MW "
                       "installed capacity."),
-        ("Energy", "Each block is 15 minutes, so energy = power x 0.25 h."),
+        ("Total error", "Predicted minus actual. Morning under-forecasts and afternoon "
+                        "over-forecasts partly cancel here, so the absolute total is the "
+                        "stricter measure."),
     ]
     for i, (k, v) in enumerate(notes):
         ws.cell(row=lrow + i, column=1, value=k).font = F_LABEL
@@ -269,10 +319,11 @@ def main():
 
     print(f"written: {target}")
     print(f"one sheet '{ws.title}': {len(blocks)} blocks x {n_run} scheduling times")
-    print(f"  total predicted energy : {predicted_energy:.3f} MWh")
-    print(f"  total actual energy    : {actual_energy:.3f} MWh")
-    print(f"  total error            : {net_error:+.3f} MWh")
-    print(f"  total absolute error   : {abs_error_energy:.3f} MWh")
+    print(f"  blocks scored          : {len(scored)}")
+    print(f"  total predicted        : {total_predicted:.4f} MW")
+    print(f"  total actual           : {total_actual:.4f} MW")
+    print(f"  total error            : {total_error:+.4f} MW")
+    print(f"  total absolute error   : {total_abs_error:.4f} MW")
     print(f"  deviation              : {deviation:.2f}%")
     print(f"  MAE / RMSE             : {mae:.4f} / {rmse:.4f} MW")
 
