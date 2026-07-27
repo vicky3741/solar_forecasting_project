@@ -174,12 +174,19 @@ def main():
     else:
         report["actual_is_real"] = report["actual_kw"].notna()
 
-    report["error_kw"] = (report["scheduled_kw"] - report["actual_kw"]).round(1)
-    report["scheduled_kw"] = report["scheduled_kw"].round(1)
-    report["actual_kw"] = report["actual_kw"].round(1)
+    # Reported in MW throughout - the plant is rated in MW (5.1 MW) and
+    # schedules are submitted in MW, so kW only invites conversion slips.
+    report["scheduled_mw"] = (report["scheduled_kw"] / 1000).round(4)
+    report["actual_mw"] = (report["actual_kw"] / 1000).round(4)
+    report["error_mw"] = (report["scheduled_mw"] - report["actual_mw"]).round(4)
+    report["capacity_utilisation_pct"] = (
+        report["scheduled_mw"] / (CAPACITY_KW / 1000) * 100
+    ).round(2)
+
+    report = report.drop(columns=["scheduled_kw", "actual_kw"])
 
     # ---- scoring: real measured blocks only ----
-    scored = report[report["actual_is_real"] & report["actual_kw"].notna()]
+    scored = report[report["actual_is_real"] & report["actual_mw"].notna()]
 
     out_dir = Path("outputs/schedules")
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -204,41 +211,83 @@ def main():
     print(run_log.to_string(index=False))
     print()
 
-    print("SCHEDULE")
+    print("SCHEDULE (MW)")
     print("-" * 84)
     display = report[[
-        "block", "block_time", "scheduled_kw", "actual_kw", "error_kw", "scheduled_at"
+        "block", "block_time", "scheduled_mw", "actual_mw", "error_mw", "scheduled_at"
     ]]
     print(display.to_string(index=False))
     print()
 
     if scored.empty:
         print("No real measured blocks available to score against yet.")
-    else:
-        deviation = metrics.average_percentage_deviation(
-            scored["scheduled_kw"], scored["actual_kw"], CAPACITY_KW
-        )
-        mae = metrics.mean_absolute_error(scored["scheduled_kw"], scored["actual_kw"])
-        rmse = metrics.root_mean_squared_error(scored["scheduled_kw"], scored["actual_kw"])
+        return
 
-        print("=" * 84)
-        print("ACCURACY vs ACTUAL METER DATA")
-        print("=" * 84)
-        print(f"  blocks scored (real measurements only) : {len(scored)}")
-        print(f"  average percentage deviation           : {deviation:.2f}%")
-        print(f"  mean absolute error                    : {mae:.1f} kW")
-        print(f"  root mean squared error                : {rmse:.1f} kW")
-        print(f"  scheduled energy                       : "
-              f"{scored['scheduled_kw'].sum() * 0.25 / 1000:.3f} MWh")
-        print(f"  actual energy                          : "
-              f"{scored['actual_kw'].sum() * 0.25 / 1000:.3f} MWh")
-        print(f"  average scheduled / actual             : "
-              f"{scored['scheduled_kw'].mean()/1000:.3f} MW / "
-              f"{scored['actual_kw'].mean()/1000:.3f} MW")
+    capacity_mw = CAPACITY_KW / 1000
+
+    deviation = metrics.average_percentage_deviation(
+        scored["scheduled_mw"], scored["actual_mw"], capacity_mw
+    )
+    mae = metrics.mean_absolute_error(scored["scheduled_mw"], scored["actual_mw"])
+    rmse = metrics.root_mean_squared_error(scored["scheduled_mw"], scored["actual_mw"])
+
+    scheduled_energy = scored["scheduled_mw"].sum() * 0.25
+    actual_energy = scored["actual_mw"].sum() * 0.25
+
+    print("=" * 84)
+    print(f"ACCURACY vs ACTUAL METER DATA   (plant capacity {capacity_mw} MW)")
+    print("=" * 84)
+    print(f"  blocks scored (real measurements only) : {len(scored)}")
+    print(f"  average percentage deviation           : {deviation:.2f}%")
+    print(f"  mean absolute error                    : {mae:.4f} MW")
+    print(f"  root mean squared error                : {rmse:.4f} MW")
+    print(f"  scheduled energy                       : {scheduled_energy:.3f} MWh")
+    print(f"  actual energy                          : {actual_energy:.3f} MWh")
+    print(f"  energy difference                      : "
+          f"{scheduled_energy - actual_energy:+.3f} MWh "
+          f"({(scheduled_energy/actual_energy - 1) * 100:+.1f}%)")
+    print(f"  average scheduled / actual             : "
+          f"{scored['scheduled_mw'].mean():.3f} MW / "
+          f"{scored['actual_mw'].mean():.3f} MW")
+    print(f"  peak scheduled / actual                : "
+          f"{scored['scheduled_mw'].max():.3f} MW / "
+          f"{scored['actual_mw'].max():.3f} MW")
+
+    # Machine-readable summary beside the schedule, so the report
+    # builder never has to re-derive these numbers.
+    summary = pd.DataFrame([
+        {"metric": "Plant", "value": PLANT_NAME},
+        {"metric": "Plant capacity (MW)", "value": capacity_mw},
+        {"metric": "Schedule date", "value": str(day)},
+        {"metric": "Scheduling times", "value": ", ".join(RUN_TIMES)},
+        {"metric": "Windy clips available", "value":
+            f"{int((run_log['vision_signal'] == 'yes').sum())} of {len(RUN_TIMES)}"},
+        {"metric": "Blocks scheduled", "value": len(report)},
+        {"metric": "Blocks scored (real measurements only)", "value": len(scored)},
+        {"metric": "Average percentage deviation (%)", "value": round(deviation, 2)},
+        {"metric": "Mean absolute error (MW)", "value": round(mae, 4)},
+        {"metric": "Root mean squared error (MW)", "value": round(rmse, 4)},
+        {"metric": "Scheduled energy (MWh)", "value": round(scheduled_energy, 3)},
+        {"metric": "Actual energy (MWh)", "value": round(actual_energy, 3)},
+        {"metric": "Energy difference (MWh)", "value":
+            round(scheduled_energy - actual_energy, 3)},
+        {"metric": "Average scheduled (MW)", "value":
+            round(scored["scheduled_mw"].mean(), 3)},
+        {"metric": "Average actual (MW)", "value":
+            round(scored["actual_mw"].mean(), 3)},
+        {"metric": "Peak scheduled (MW)", "value":
+            round(scored["scheduled_mw"].max(), 3)},
+        {"metric": "Peak actual (MW)", "value":
+            round(scored["actual_mw"].max(), 3)},
+    ])
+
+    summary_path = out_dir / f"day_schedule_{day}_summary.csv"
+    summary.to_csv(summary_path, index=False)
 
     print()
     print(f"Saved schedule : {schedule_path}")
     print(f"Saved run log  : {log_path}")
+    print(f"Saved summary  : {summary_path}")
 
 
 if __name__ == "__main__":
