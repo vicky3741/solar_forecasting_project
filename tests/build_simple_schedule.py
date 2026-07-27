@@ -76,8 +76,14 @@ def main():
 
     merged = merged[merged["timestamp"].dt.date == pd.Timestamp(DAY).date()]
 
+    # Drop the pre-dawn blocks the meter covers but no scheduling run ever
+    # reached - the first run is at 06:45, so nothing before 07:00 has a
+    # schedule to compare against and those rows were only empty space.
+    merged = merged[merged["scheduled_mw"].notna()].reset_index(drop=True)
+
+    # The date is stated once in the title, so the rows carry time only.
     out = pd.DataFrame({
-        "TimeStamp": merged["timestamp"].dt.strftime("%Y-%m-%d %H:%M:%S"),
+        "Time": merged["timestamp"].dt.strftime("%H:%M"),
         "Scheduled Power (kW)": (merged["scheduled_mw"] * 1000).round(2),
         "Actual Power (kW)": merged["active_power_kw"].round(2),
     })
@@ -129,41 +135,55 @@ def main():
 
     last = 3 + len(out)
 
-    # totals over the blocks both sides cover
+    # ---------------- accuracy, in MW only ----------------
+    # Blocks the meter actually measured; the trailing blocks after 18:00
+    # are scheduled but have no reading yet, so they cannot be scored.
     both = out.dropna(subset=["Scheduled Power (kW)", "Actual Power (kW)"])
 
-    trow = last + 1
-    labels = ["TOTAL", f"{len(both)} blocks",
-              round(both["Scheduled Power (kW)"].sum() / 1000, 3),
-              round(both["Actual Power (kW)"].sum() / 1000, 3),
-              round(both["Error (kW)"].sum() / 1000, 3)]
-    for i, v in enumerate(labels[:1] + labels[2:], start=1):
-        cell = ws.cell(row=trow, column=i, value=v)
-        cell.font = f_head
-        cell.fill = fill_head
-        cell.alignment = center
+    scheduled_mw = both["Scheduled Power (kW)"] / 1000
+    actual_mw = both["Actual Power (kW)"] / 1000
+    error_mw = both["Error (kW)"] / 1000
+
+    total_predicted = float(scheduled_mw.sum())
+    total_actual = float(actual_mw.sum())
+    total_error = total_predicted - total_actual
+    total_abs_error = float(error_mw.abs().sum())
+    mae = float(error_mw.abs().mean())
+    rmse = float((error_mw ** 2).mean() ** 0.5)
+    deviation = mae / (CAPACITY_KW / 1000) * 100
+
+    mrow = last + 2
+    ws.cell(row=mrow, column=1, value="ACCURACY vs ACTUAL METER DATA").font = Font(
+        name=FONT, size=11, bold=True, color=NAVY)
+
+    # Energy figures are deliberately absent: they can only be stated in
+    # MWh, and this report is MW-only by request.
+    metrics = [
+        ("Blocks scored (real meter readings)", len(both), "0"),
+        ("Average predicted (MW)", round(float(scheduled_mw.mean()), 3), "0.000"),
+        ("Average actual (MW)", round(float(actual_mw.mean()), 3), "0.000"),
+        ("Peak predicted (MW)", round(float(scheduled_mw.max()), 3), "0.000"),
+        ("Peak actual (MW)", round(float(actual_mw.max()), 3), "0.000"),
+        ("Total predicted (MW)", round(total_predicted, 3), "0.000"),
+        ("Total actual (MW)", round(total_actual, 3), "0.000"),
+        ("Total error - predicted minus actual (MW)", round(total_error, 3),
+         "+0.000;-0.000"),
+        ("Total absolute error (MW)", round(total_abs_error, 3), "0.000"),
+        ("Average percentage deviation (%)", round(deviation, 2), "0.00"),
+        ("Mean absolute error (MW)", round(mae, 4), "0.0000"),
+        ("Root mean squared error (MW)", round(rmse, 4), "0.0000"),
+    ]
+
+    for j, (label, value, fmt) in enumerate(metrics, start=1):
+        ws.cell(row=mrow + j, column=1, value=label).font = f_bold
+        cell = ws.cell(row=mrow + j, column=3, value=value)
+        cell.font = f_body
+        cell.number_format = fmt
+        cell.fill = fill_grey
         cell.border = box
-        if i > 1:
-            cell.number_format = "0.000"
-    ws.cell(row=trow, column=1, value="TOTAL (MW)")
+        cell.alignment = center
 
-    note = trow + 2
-    for i, (k, v) in enumerate([
-        ("Rows", f"One row per 15-minute block, matching the meter file's timestamps "
-                 f"exactly. Nothing is accumulated - each row is that block's own power."),
-        ("Blank cells", "Blocks the meter covers but no scheduling run reached (before "
-                        "06:45), or blocks with no meter reading (after 18:00)."),
-        ("Error", "Scheduled minus actual. Negative = we scheduled below what the plant "
-                  "produced; positive = above."),
-        ("TOTAL row", f"Sum of the {len(both)} blocks both sides cover, shown in MW."),
-    ]):
-        ws.cell(row=note + i, column=1, value=k).font = f_bold
-        c = ws.cell(row=note + i, column=2, value=v)
-        c.font = Font(name=FONT, size=9, color="595959")
-        c.alignment = Alignment(wrap_text=True, vertical="top")
-        ws.row_dimensions[note + i].height = 24
-
-    ws.column_dimensions["A"].width = 21
+    ws.column_dimensions["A"].width = 34
     for col in "BCD":
         ws.column_dimensions[col].width = 19
     ws.freeze_panes = ws.cell(row=4, column=1)
@@ -178,12 +198,15 @@ def main():
             target = xlsx_path.with_name(
                 f"{xlsx_path.stem}_{attempt}{xlsx_path.suffix}")
 
-    print(f"rows: {len(out)}  (meter file day range)")
-    print(f"blocks with both schedule and meter: {len(both)}")
+    print(f"rows: {len(out)}   scored blocks: {len(both)}")
     print()
-    print(out.head(8).to_string(index=False))
+    print(out.head(6).to_string(index=False))
     print("...")
     print(out.tail(4).to_string(index=False))
+    print()
+    print("ACCURACY (MW only)")
+    for label, value, _fmt in metrics:
+        print(f"  {label:<44} {value}")
     print()
     print(f"saved CSV  : {csv_path}")
     print(f"saved Excel: {target}")
