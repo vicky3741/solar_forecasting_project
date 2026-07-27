@@ -9,11 +9,18 @@ every scheduling time across the columns.
 
 Each column shows what THAT scheduling run published for
 that block. A run's column is blank for blocks that had
-already passed when it ran - which is the document's rule
-("the schedule values for the blocks that have already
-passed will remain unchanged") made visible as a staircase.
-The final published value, the actual meter reading and the
+already passed when it ran - the document's rule ("the
+schedule values for the blocks that have already passed
+will remain unchanged") made visible as a staircase. The
+final published value, the actual meter reading and the
 error close the table.
+
+Written for speed: plain computed values rather than
+formulas, one merged range, and a handful of shared style
+objects reused across every cell. A workbook whose formulas
+carry no cached result forces a full recalculation the
+moment it opens, which is what made an earlier version feel
+sluggish in phone and browser viewers.
 
 Run:  python -m tests.build_single_sheet_report [YYYY-MM-DD]
 =========================================================
@@ -22,6 +29,7 @@ Run:  python -m tests.build_single_sheet_report [YYYY-MM-DD]
 import sys
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
@@ -34,6 +42,7 @@ OUT = Path(f"outputs/reports/Schedule_{DAY}_single_sheet.xlsx")
 
 CAPACITY_MW = 5.1
 PLANT = "Sirmour Solar Plant"
+BLOCK_HOURS = 0.25
 
 FONT = "Arial"
 NAVY = "1F3864"
@@ -41,239 +50,232 @@ BLUE = "DCE6F1"
 GREY = "F2F2F2"
 AMBER = "FCE4D6"
 
-schedule = pd.read_csv(SRC / f"day_schedule_{DAY}.csv")
-per_run = pd.read_csv(SRC / f"day_schedule_{DAY}_per_run.csv")
-run_log = pd.read_csv(SRC / f"day_schedule_{DAY}_run_log.csv")
+# --- shared style objects: created once, referenced everywhere ---
+CENTER = Alignment(horizontal="center", vertical="center")
+CENTER_WRAP = Alignment(horizontal="center", vertical="center", wrap_text=True)
+LEFT_WRAP = Alignment(horizontal="left", vertical="top", wrap_text=True)
 
-run_times = list(run_log["scheduling_time"])
+_thin = Side(style="thin", color="BFBFBF")
+BOX = Border(left=_thin, right=_thin, top=_thin, bottom=_thin)
 
-# block -> {scheduling_time: scheduled_mw}
-matrix = per_run.pivot_table(
-    index="block", columns="scheduling_time", values="scheduled_mw", aggfunc="first"
-)
+F_TITLE = Font(name=FONT, size=13, bold=True, color=NAVY)
+F_SUB = Font(name=FONT, size=9, italic=True, color="595959")
+F_HEAD = Font(name=FONT, size=9.5, bold=True, color="FFFFFF")
+F_BODY = Font(name=FONT, size=9.5)
+F_OWNER = Font(name=FONT, size=9.5, bold=True)
+F_POS = Font(name=FONT, size=9.5, color="C00000")
+F_NEG = Font(name=FONT, size=9.5, color="1F4E79")
+F_SECTION = Font(name=FONT, size=11, bold=True, color=NAVY)
+F_LABEL = Font(name=FONT, size=10, bold=True)
+F_VALUE = Font(name=FONT, size=10)
+F_NOTE = Font(name=FONT, size=9, color="595959")
 
-base = schedule[["block", "block_time", "scheduled_mw", "actual_mw",
-                 "error_mw", "actual_is_real", "scheduled_at"]].copy()
-base = base.set_index("block")
+FILL_HEAD = PatternFill("solid", fgColor=NAVY)
+FILL_OWNER = PatternFill("solid", fgColor=BLUE)
+FILL_GREY = PatternFill("solid", fgColor=GREY)
+FILL_AMBER = PatternFill("solid", fgColor=AMBER)
 
-thin = Side(style="thin", color="BFBFBF")
-box = Border(left=thin, right=thin, top=thin, bottom=thin)
 
-wb = Workbook()
-ws = wb.active
-ws.title = f"Schedule {DAY}"
+def main():
 
-n_run = len(run_times)
-total_cols = 2 + n_run + 4        # block, time, runs..., final, actual, error, source
+    schedule = pd.read_csv(SRC / f"day_schedule_{DAY}.csv")
+    per_run = pd.read_csv(SRC / f"day_schedule_{DAY}_per_run.csv")
+    run_log = pd.read_csv(SRC / f"day_schedule_{DAY}_run_log.csv")
 
-# ---------------- title ----------------
-ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=total_cols)
-c = ws.cell(row=1, column=1,
-            value=f"{PLANT} - Reconstructed Day Schedule - {DAY}  (all values in MW, "
-                  f"installed capacity {CAPACITY_MW} MW)")
-c.font = Font(name=FONT, size=13, bold=True, color=NAVY)
-c.alignment = Alignment(horizontal="center")
-ws.row_dimensions[1].height = 20
+    run_times = list(run_log["scheduling_time"])
 
-ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=total_cols)
-c = ws.cell(row=2, column=1,
-            value="Each scheduling column shows what that run scheduled for the block. "
-                  "Blank = the block had already passed when that run executed, so its value "
-                  "stayed frozen from an earlier run.")
-c.font = Font(name=FONT, size=9, italic=True, color="595959")
-c.alignment = Alignment(horizontal="center")
+    matrix = per_run.pivot_table(
+        index="block", columns="scheduling_time",
+        values="scheduled_mw", aggfunc="first",
+    )
 
-# ---------------- grouped header ----------------
-HEAD1, HEAD2 = 4, 5
+    base = schedule.set_index("block")
 
-ws.merge_cells(start_row=HEAD1, start_column=1, end_row=HEAD2, end_column=1)
-ws.cell(row=HEAD1, column=1, value="Block")
-ws.merge_cells(start_row=HEAD1, start_column=2, end_row=HEAD2, end_column=2)
-ws.cell(row=HEAD1, column=2, value="Time")
+    wb = Workbook()
+    ws = wb.active
+    ws.title = f"Schedule {DAY}"
 
-first_run_col = 3
-last_run_col = 2 + n_run
-ws.merge_cells(start_row=HEAD1, start_column=first_run_col,
-               end_row=HEAD1, end_column=last_run_col)
-ws.cell(row=HEAD1, column=first_run_col,
-        value="SCHEDULE GENERATED AT EACH SCHEDULING TIME (MW)")
+    n_run = len(run_times)
+    total_cols = 2 + n_run + 4
 
-for i, rt in enumerate(run_times):
-    ws.cell(row=HEAD2, column=first_run_col + i, value=rt)
+    # ---------------- title (the only merged range) ----------------
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=total_cols)
+    c = ws.cell(row=1, column=1,
+                value=f"{PLANT} - Reconstructed Day Schedule - {DAY}   "
+                      f"(all power in MW, energy in MWh, installed capacity "
+                      f"{CAPACITY_MW} MW)")
+    c.font = F_TITLE
+    c.alignment = CENTER
+    ws.row_dimensions[1].height = 20
 
-col_final = last_run_col + 1
-col_actual = col_final + 1
-col_error = col_actual + 1
-col_src = col_error + 1
+    c = ws.cell(row=2, column=1,
+                value="Each scheduling column shows what that run scheduled for the block. "
+                      "Blank = the block had already passed when that run executed, so it "
+                      "kept the value an earlier run gave it.")
+    c.font = F_SUB
 
-ws.merge_cells(start_row=HEAD1, start_column=col_final, end_row=HEAD1, end_column=col_error)
-ws.cell(row=HEAD1, column=col_final, value="FINAL SCHEDULE vs ACTUAL")
-ws.cell(row=HEAD2, column=col_final, value="Final (MW)")
-ws.cell(row=HEAD2, column=col_actual, value="Actual (MW)")
-ws.cell(row=HEAD2, column=col_error, value="Error (MW)")
+    # ---------------- header ----------------
+    HEAD = 4
+    labels = (["Block", "Time"] + run_times
+              + ["Final (MW)", "Actual (MW)", "Error (MW)", "Set by run"])
 
-ws.merge_cells(start_row=HEAD1, start_column=col_src, end_row=HEAD2, end_column=col_src)
-ws.cell(row=HEAD1, column=col_src, value="Set by run")
+    for i, label in enumerate(labels, start=1):
+        cell = ws.cell(row=HEAD, column=i, value=label)
+        cell.font = F_HEAD
+        cell.fill = FILL_HEAD
+        cell.alignment = CENTER_WRAP
+        cell.border = BOX
+    ws.row_dimensions[HEAD].height = 22
 
-for row in (HEAD1, HEAD2):
-    for col in range(1, total_cols + 1):
-        cell = ws.cell(row=row, column=col)
-        cell.font = Font(name=FONT, size=9.5, bold=True, color="FFFFFF")
-        cell.fill = PatternFill("solid", fgColor=NAVY)
-        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-        cell.border = box
-ws.row_dimensions[HEAD1].height = 26
-ws.row_dimensions[HEAD2].height = 18
+    first_run_col = 3
+    col_final = 2 + n_run + 1
+    col_actual = col_final + 1
+    col_error = col_actual + 1
+    col_src = col_error + 1
 
-# ---------------- data rows ----------------
-start = HEAD2 + 1
-blocks = list(base.index)
+    # ---------------- data ----------------
+    start = HEAD + 1
+    blocks = list(base.index)
 
-for r, block in enumerate(blocks, start=start):
+    for r, block in enumerate(blocks, start=start):
 
-    rec = base.loc[block]
+        rec = base.loc[block]
+        unscored = not bool(rec["actual_is_real"])
 
-    ws.cell(row=r, column=1, value=int(block)).number_format = "0"
-    ws.cell(row=r, column=2, value=rec["block_time"])
+        ws.cell(row=r, column=1, value=int(block))
+        ws.cell(row=r, column=2, value=rec["block_time"])
 
-    for i, rt in enumerate(run_times):
-        value = matrix.loc[block, rt] if rt in matrix.columns else None
-        if pd.isna(value):
-            value = None
-        cell = ws.cell(row=r, column=first_run_col + i, value=value)
-        if value is not None:
-            cell.number_format = "0.0000"
-            # highlight the run that ended up owning this block
-            if rt == rec["scheduled_at"]:
-                cell.fill = PatternFill("solid", fgColor=BLUE)
-                cell.font = Font(name=FONT, size=9.5, bold=True)
+        for i, rt in enumerate(run_times):
+            value = matrix.loc[block, rt] if rt in matrix.columns else None
+            if pd.isna(value):
+                value = None
+            cell = ws.cell(row=r, column=first_run_col + i, value=value)
+            if value is not None:
+                cell.number_format = "0.0000"
+                if rt == rec["scheduled_at"]:
+                    cell.fill = FILL_OWNER
+                    cell.font = F_OWNER
 
-    ws.cell(row=r, column=col_final, value=float(rec["scheduled_mw"])
-            ).number_format = "0.0000"
+        ws.cell(row=r, column=col_final,
+                value=float(rec["scheduled_mw"])).number_format = "0.0000"
 
-    actual = None if pd.isna(rec["actual_mw"]) else float(rec["actual_mw"])
-    error = None if pd.isna(rec["error_mw"]) else float(rec["error_mw"])
+        actual = None if pd.isna(rec["actual_mw"]) else float(rec["actual_mw"])
+        error = None if pd.isna(rec["error_mw"]) else float(rec["error_mw"])
 
-    ws.cell(row=r, column=col_actual, value=actual).number_format = "0.0000"
-    ec = ws.cell(row=r, column=col_error, value=error)
-    ec.number_format = "0.0000;-0.0000"
-    if error is not None:
-        ec.font = Font(name=FONT, size=9.5,
-                       color="C00000" if error > 0 else "1F4E79")
+        ws.cell(row=r, column=col_actual, value=actual).number_format = "0.0000"
 
-    ws.cell(row=r, column=col_src, value=rec["scheduled_at"])
+        ec = ws.cell(row=r, column=col_error, value=error)
+        ec.number_format = "0.0000;-0.0000"
+        if error is not None:
+            ec.font = F_POS if error > 0 else F_NEG
 
-    for col in range(1, total_cols + 1):
-        cell = ws.cell(row=r, column=col)
-        cell.border = box
-        cell.alignment = Alignment(horizontal="center")
-        # Font was already set deliberately on the highlighted and
-        # error cells; only fill in the plain ones.
-        if not cell.font.bold and col != col_error:
-            cell.font = Font(name=FONT, size=9.5)
-        if not bool(rec["actual_is_real"]):
-            cell.fill = PatternFill("solid", fgColor=AMBER)
+        ws.cell(row=r, column=col_src, value=rec["scheduled_at"])
 
-last_row = start + len(blocks) - 1
+        for col in range(1, total_cols + 1):
+            cell = ws.cell(row=r, column=col)
+            cell.border = BOX
+            cell.alignment = CENTER
+            if cell.font is None or cell.font.sz is None:
+                cell.font = F_BODY
+            if unscored:
+                cell.fill = FILL_AMBER
 
-# ---------------- metrics ----------------
-mrow = last_row + 2
-ws.cell(row=mrow, column=1, value="ACCURACY vs ACTUAL METER DATA").font = Font(
-    name=FONT, size=11, bold=True, color=NAVY)
-ws.merge_cells(start_row=mrow, start_column=1, end_row=mrow, end_column=4)
+    last_row = start + len(blocks) - 1
 
-fl = f"{get_column_letter(col_actual)}{start}:{get_column_letter(col_actual)}{last_row}"
-er = f"{get_column_letter(col_error)}{start}:{get_column_letter(col_error)}{last_row}"
-fn = f"{get_column_letter(col_final)}{start}:{get_column_letter(col_final)}{last_row}"
+    # ---------------- accuracy, computed here (no formulas) ----------------
+    scored = schedule[schedule["actual_is_real"] & schedule["actual_mw"].notna()]
 
-metrics = [
-    ("Blocks scheduled", f"=COUNT({fn})", "0"),
-    ("Blocks scored (real readings only)", f"=COUNT({fl})", "0"),
-    ("Average percentage deviation (%)",
-     f"=SUMPRODUCT(ABS({er}))/COUNT({er})/{CAPACITY_MW}*100", "0.00"),
-    ("Mean absolute error (MW)", f"=SUMPRODUCT(ABS({er}))/COUNT({er})", "0.0000"),
-    ("Root mean squared error (MW)",
-     f"=SQRT(SUMPRODUCT({er},{er})/COUNT({er}))", "0.0000"),
-    ("Scheduled energy (MWh)", f"=SUMIF({fl},\">=0\",{fn})*0.25", "0.000"),
-    ("Actual energy (MWh)", f"=SUM({fl})*0.25", "0.000"),
-    ("Average scheduled (MW)", f"=SUMIF({fl},\">=0\",{fn})/COUNT({fl})", "0.000"),
-    ("Average actual (MW)", f"=AVERAGE({fl})", "0.000"),
-    ("Peak scheduled (MW)", f"=MAX({fn})", "0.000"),
-    ("Peak actual (MW)", f"=MAX({fl})", "0.000"),
-]
+    predicted_energy = float(scored["scheduled_mw"].sum() * BLOCK_HOURS)
+    actual_energy = float(scored["actual_mw"].sum() * BLOCK_HOURS)
+    net_error = predicted_energy - actual_energy
+    abs_error_energy = float(scored["error_mw"].abs().sum() * BLOCK_HOURS)
+    mae = float(scored["error_mw"].abs().mean())
+    rmse = float(np.sqrt((scored["error_mw"] ** 2).mean()))
+    deviation = mae / CAPACITY_MW * 100
 
-for j, (label, formula, fmt) in enumerate(metrics, start=1):
-    ws.cell(row=mrow + j, column=1, value=label).font = Font(name=FONT, size=10, bold=True)
-    ws.merge_cells(start_row=mrow + j, start_column=1, end_row=mrow + j, end_column=3)
-    c = ws.cell(row=mrow + j, column=4, value=formula)
-    c.font = Font(name=FONT, size=10)
-    c.number_format = fmt
-    c.fill = PatternFill("solid", fgColor=GREY)
-    c.border = box
+    mrow = last_row + 2
+    ws.cell(row=mrow, column=1, value="ACCURACY vs ACTUAL METER DATA").font = F_SECTION
 
-# ---------------- per-run detail ----------------
-srow = mrow + len(metrics) + 3
-ws.cell(row=srow, column=1, value="WINDY CLIP USED AT EACH SCHEDULING TIME").font = Font(
-    name=FONT, size=11, bold=True, color=NAVY)
-ws.merge_cells(start_row=srow, start_column=1, end_row=srow, end_column=4)
+    rows = [
+        ("Blocks scored (real meter readings)", len(scored), "0"),
+        ("Total predicted energy (MWh)", round(predicted_energy, 3), "0.000"),
+        ("Total actual energy (MWh)", round(actual_energy, 3), "0.000"),
+        ("Total error - predicted minus actual (MWh)", round(net_error, 3), "+0.000;-0.000"),
+        ("Total absolute error (MWh)", round(abs_error_energy, 3), "0.000"),
+        ("Average percentage deviation (%)", round(deviation, 2), "0.00"),
+        ("Mean absolute error (MW)", round(mae, 4), "0.0000"),
+        ("Root mean squared error (MW)", round(rmse, 4), "0.0000"),
+    ]
 
-heads = ["Scheduling time", "Windy clip stored for that time", "Vision used",
-         "Blocks scheduled", "Weather bias factor"]
-for i, h in enumerate(heads, start=1):
-    cell = ws.cell(row=srow + 1, column=i, value=h)
-    cell.font = Font(name=FONT, size=9.5, bold=True, color="FFFFFF")
-    cell.fill = PatternFill("solid", fgColor=NAVY)
-    cell.alignment = Alignment(horizontal="center", wrap_text=True)
-    cell.border = box
+    for j, (label, value, fmt) in enumerate(rows, start=1):
+        lc = ws.cell(row=mrow + j, column=1, value=label)
+        lc.font = F_LABEL
+        vc = ws.cell(row=mrow + j, column=4, value=value)
+        vc.font = F_VALUE
+        vc.number_format = fmt
+        vc.fill = FILL_GREY
+        vc.border = BOX
+        vc.alignment = CENTER
 
-for i, (_, rec) in enumerate(run_log.iterrows(), start=srow + 2):
-    values = [rec["scheduling_time"], rec["windy_video_used"], rec["vision_signal"],
-              int(rec["blocks_written"]), float(rec["weather_bias_factor"])]
-    for j, v in enumerate(values, start=1):
-        cell = ws.cell(row=i, column=j, value=v)
-        cell.font = Font(name=FONT, size=9.5)
-        cell.border = box
-        cell.alignment = Alignment(horizontal="center")
-        if j == 5:
-            cell.number_format = "0.000"
+    # ---------------- legend ----------------
+    lrow = mrow + len(rows) + 2
+    notes = [
+        ("Method", "Per 'Schedule Generation Workflow for Model Evaluation': each scheduling "
+                   "time uses only the Windy clip stored at that time and meter data up to "
+                   "block T, then schedules to end of day. Past blocks stay frozen; only "
+                   "future blocks are rewritten."),
+        ("Blue cells", "The scheduling run whose value was finally published for that block."),
+        ("Blank cells", "That block had already passed when the run executed."),
+        ("Orange rows", "No measured meter reading - excluded from every figure above."),
+        ("Deviation", f"Mean absolute error as a percentage of the {CAPACITY_MW} MW "
+                      "installed capacity."),
+        ("Energy", "Each block is 15 minutes, so energy = power x 0.25 h."),
+    ]
+    for i, (k, v) in enumerate(notes):
+        ws.cell(row=lrow + i, column=1, value=k).font = F_LABEL
+        cell = ws.cell(row=lrow + i, column=3, value=v)
+        cell.font = F_NOTE
+        cell.alignment = LEFT_WRAP
+        ws.row_dimensions[lrow + i].height = 24
 
-# ---------------- legend ----------------
-lrow = srow + len(run_log) + 3
-notes = [
-    ("Method", "Per 'Schedule Generation Workflow for Model Evaluation': each scheduling "
-               "time uses only the Windy clip stored at that time and meter data up to block "
-               "T, then schedules to end of day. Past blocks stay frozen; only future blocks "
-               "are rewritten."),
-    ("Blue cells", "The scheduling run whose value was finally published for that block."),
-    ("Blank cells", "That block had already passed when the run executed."),
-    ("Orange rows", "No measured meter reading - excluded from all accuracy figures."),
-    ("Deviation", f"Mean absolute error as a percentage of the {CAPACITY_MW} MW installed "
-                  "capacity."),
-    ("Weather bias factor", "The weather forecast is scaled by this, learned from how much it "
-                            "over-forecast sunlight on preceding days (0.732 = discounted by "
-                            "26.8%)."),
-]
-for i, (k, v) in enumerate(notes):
-    ws.cell(row=lrow + i, column=1, value=k).font = Font(name=FONT, size=9, bold=True)
-    c = ws.cell(row=lrow + i, column=2, value=v)
-    c.font = Font(name=FONT, size=9, color="595959")
-    c.alignment = Alignment(wrap_text=True, vertical="top")
-    ws.merge_cells(start_row=lrow + i, start_column=2, end_row=lrow + i, end_column=total_cols)
-    ws.row_dimensions[lrow + i].height = 26
+    # ---------------- widths ----------------
+    ws.column_dimensions["A"].width = 8
+    ws.column_dimensions["B"].width = 9
+    for i in range(n_run):
+        ws.column_dimensions[get_column_letter(first_run_col + i)].width = 10.5
+    for col in (col_final, col_actual, col_error, col_src):
+        ws.column_dimensions[get_column_letter(col)].width = 11
 
-# ---------------- widths / freeze ----------------
-ws.column_dimensions["A"].width = 8
-ws.column_dimensions["B"].width = 9
-for i in range(n_run):
-    ws.column_dimensions[get_column_letter(first_run_col + i)].width = 10.5
-ws.column_dimensions[get_column_letter(col_final)].width = 11
-ws.column_dimensions[get_column_letter(col_actual)].width = 11
-ws.column_dimensions[get_column_letter(col_error)].width = 11
-ws.column_dimensions[get_column_letter(col_src)].width = 11
+    ws.freeze_panes = ws.cell(row=start, column=3)
 
-ws.freeze_panes = ws.cell(row=start, column=3)
+    OUT.parent.mkdir(parents=True, exist_ok=True)
 
-OUT.parent.mkdir(parents=True, exist_ok=True)
-wb.save(OUT)
-print(f"written: {OUT}")
-print(f"one sheet: '{ws.title}'  |  {len(blocks)} blocks x {n_run} scheduling times")
+    # Excel holds an exclusive lock on an open workbook, so a rebuild
+    # while the previous version is still open would otherwise die with
+    # PermissionError. Fall back to a numbered name rather than losing
+    # the run.
+    target = OUT
+    for attempt in range(1, 20):
+        try:
+            wb.save(target)
+            break
+        except PermissionError:
+            target = OUT.with_name(f"{OUT.stem}_{attempt}{OUT.suffix}")
+    else:
+        raise PermissionError(f"Could not write {OUT} or any fallback name")
+
+    if target != OUT:
+        print(f"NOTE: {OUT.name} is open in Excel - saved as {target.name} instead")
+
+    print(f"written: {target}")
+    print(f"one sheet '{ws.title}': {len(blocks)} blocks x {n_run} scheduling times")
+    print(f"  total predicted energy : {predicted_energy:.3f} MWh")
+    print(f"  total actual energy    : {actual_energy:.3f} MWh")
+    print(f"  total error            : {net_error:+.3f} MWh")
+    print(f"  total absolute error   : {abs_error_energy:.3f} MWh")
+    print(f"  deviation              : {deviation:.2f}%")
+    print(f"  MAE / RMSE             : {mae:.4f} / {rmse:.4f} MW")
+
+
+if __name__ == "__main__":
+    main()
