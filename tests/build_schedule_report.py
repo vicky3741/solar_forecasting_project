@@ -30,6 +30,8 @@ GREY = "F2F2F2"
 
 schedule = pd.read_csv(SRC / f"day_schedule_{DAY}.csv")
 run_log = pd.read_csv(SRC / f"day_schedule_{DAY}_run_log.csv")
+per_run = pd.read_csv(SRC / f"day_schedule_{DAY}_per_run.csv")
+per_run_scores = pd.read_csv(SRC / f"day_schedule_{DAY}_per_run_scores.csv")
 
 thin = Side(style="thin", color="BFBFBF")
 box = Border(left=thin, right=thin, top=thin, bottom=thin)
@@ -289,6 +291,120 @@ ws.cell(row=note_row, column=1).font = Font(name=FONT, size=9, italic=True, colo
 ws.cell(row=note_row, column=1).alignment = Alignment(wrap_text=True, vertical="top")
 ws.row_dimensions[note_row].height = 30
 
+# ==================== RUN COMPARISON (per scheduling time) ====================
+ws = wb.create_sheet("Run Comparison")
+title_block(ws, "Accuracy of each scheduling time's own schedule",
+            "Every run scored only on the blocks it actually scheduled", 7)
+
+headers = ["Scheduling Time", "Blocks Scheduled", "Blocks Scored",
+           "Deviation (%)", "MAE (MW)", "RMSE (MW)", "Scheduled Energy (MWh)"]
+widths = [18, 18, 15, 15, 14, 14, 22]
+
+for i, (h, w) in enumerate(zip(headers, widths), start=1):
+    ws.cell(row=3, column=i, value=h)
+    ws.column_dimensions[get_column_letter(i)].width = w
+style_header(ws, 3, len(headers))
+
+fmts = [None, "0", "0", "0.00", "0.0000", "0.0000", "0.000"]
+for r, (_, rec) in enumerate(per_run_scores.iterrows(), start=4):
+    values = [rec["scheduling_time"], int(rec["blocks_scheduled"]),
+              int(rec["blocks_scored"]), float(rec["deviation_pct"]),
+              float(rec["mae_mw"]), float(rec["rmse_mw"]),
+              float(rec["scheduled_energy_mwh"])]
+    for i, (v, fmt) in enumerate(zip(values, fmts), start=1):
+        cell = ws.cell(row=r, column=i, value=v)
+        cell.font = Font(name=FONT, size=10, bold=(i == 1))
+        cell.border = box
+        cell.alignment = Alignment(horizontal="center")
+        if fmt:
+            cell.number_format = fmt
+    if r % 2 == 0:
+        for i in range(1, len(headers) + 1):
+            ws.cell(row=r, column=i).fill = PatternFill("solid", fgColor=GREY)
+
+nr = 4 + len(per_run_scores) + 1
+ws.cell(row=nr, column=1,
+        value="Each row scores only the blocks that run scheduled, so the counts shrink "
+              "through the day. This is how the workflow document's requirement - generate a "
+              "schedule at every scheduling time - is evidenced: the seven sheets that follow "
+              "hold those schedules in full.")
+ws.merge_cells(start_row=nr, start_column=1, end_row=nr, end_column=7)
+ws.cell(row=nr, column=1).font = Font(name=FONT, size=9, italic=True, color="595959")
+ws.cell(row=nr, column=1).alignment = Alignment(wrap_text=True, vertical="top")
+ws.row_dimensions[nr].height = 42
+
+# ============ ONE SHEET PER SCHEDULING TIME (the document's core ask) ============
+run_cols = [
+    ("block", "Block No.", 10, "0"),
+    ("block_time", "Block Time", 12, None),
+    ("scheduled_mw", "Scheduled (MW)", 15, "0.0000"),
+    ("actual_mw", "Actual (MW)", 14, "0.0000"),
+    ("error_mw", "Error (MW)", 13, "0.0000;-0.0000"),
+    ("actual_is_real", "Real Reading", 13, None),
+]
+
+for run_time in per_run["scheduling_time"].unique():
+
+    group = per_run[per_run["scheduling_time"] == run_time]
+    info = run_log[run_log["scheduling_time"] == run_time].iloc[0]
+
+    ws = wb.create_sheet(f"Run {str(run_time).replace(':', '-')}")
+    title_block(
+        ws,
+        f"Schedule generated at {run_time}",
+        f"From block {int(group['block'].min())} ({group['block_time'].iloc[0]}) to end of day"
+        f"  |  Windy clip: {info['windy_video_used']}",
+        len(run_cols),
+    )
+
+    for i, (_, label, width, _f) in enumerate(run_cols, start=1):
+        ws.cell(row=3, column=i, value=label)
+        ws.column_dimensions[get_column_letter(i)].width = width
+    style_header(ws, 3, len(run_cols))
+
+    for r, (_, rec) in enumerate(group.iterrows(), start=4):
+        for i, (key, _l, _w, fmt) in enumerate(run_cols, start=1):
+            value = rec[key]
+            if pd.isna(value):
+                value = None
+            if key == "actual_is_real":
+                value = bool(value) if value is not None else False
+            cell = ws.cell(row=r, column=i, value=value)
+            cell.font = Font(name=FONT, size=10)
+            cell.border = box
+            cell.alignment = Alignment(horizontal="center")
+            if fmt:
+                cell.number_format = fmt
+        if r % 2 == 0:
+            for i in range(1, len(run_cols) + 1):
+                ws.cell(row=r, column=i).fill = PatternFill("solid", fgColor=GREY)
+
+    ws.freeze_panes = ws.cell(row=4, column=1)
+
+    # this run's own accuracy, as live formulas over its own rows
+    last = 3 + len(group)
+    flag_r = f"F4:F{last}"
+    err_r = f"E4:E{last}"
+    srow = last + 2
+
+    ws.cell(row=srow, column=1, value="THIS RUN'S ACCURACY").font = Font(
+        name=FONT, size=10, bold=True, color=NAVY)
+    for j, (label, formula, fmt) in enumerate([
+        ("Blocks scored", f"=SUMPRODUCT(--({flag_r}=TRUE))", "0"),
+        ("Deviation (%)",
+         f"=SUMPRODUCT(--({flag_r}=TRUE),ABS({err_r}))/SUMPRODUCT(--({flag_r}=TRUE))"
+         f"/{CAPACITY_MW}*100", "0.00"),
+        ("MAE (MW)",
+         f"=SUMPRODUCT(--({flag_r}=TRUE),ABS({err_r}))/SUMPRODUCT(--({flag_r}=TRUE))",
+         "0.0000"),
+    ], start=1):
+        ws.cell(row=srow + j, column=1, value=label).font = Font(name=FONT, size=10, bold=True)
+        c = ws.cell(row=srow + j, column=2, value=formula)
+        c.font = Font(name=FONT, size=10)
+        c.number_format = fmt
+        c.fill = PatternFill("solid", fgColor=LIGHT)
+
 OUT.parent.mkdir(parents=True, exist_ok=True)
 wb.save(OUT)
 print(f"written: {OUT}")
+print(f"sheets: {wb.sheetnames}")

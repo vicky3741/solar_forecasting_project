@@ -76,8 +76,18 @@ def load_data():
 def build_schedule(data, day, provider):
     """
     Walks the 7 scheduling times in order, rewriting only future
-    blocks. Returns the final schedule with, for every block, the
-    run that produced it and whether that run had a Windy clip.
+    blocks.
+
+    Returns three things:
+      * the FINAL schedule - every block carrying the run that last
+        wrote it (what would actually have been published),
+      * the run log,
+      * every INDIVIDUAL run's own complete schedule from its block T
+        to the end of the day. The workflow document asks for a
+        schedule to be generated at each scheduling time, so those
+        seven schedules are deliverables in their own right, not just
+        intermediate state - they show the forecast being revised as
+        the day reveals itself.
     """
 
     predictor = HybridPredictor()
@@ -89,6 +99,7 @@ def build_schedule(data, day, provider):
 
     schedule = {}          # timestamp -> dict(value, source run, had vision)
     run_log = []
+    per_run = []           # every run's own full schedule, block T -> end of day
 
     for run_str in RUN_TIMES:
 
@@ -115,6 +126,15 @@ def build_schedule(data, day, provider):
         written = 0
         for timestamp, value in zip(forecast["timestamp"], forecast["final_forecast_kw"]):
             if timestamp > run_time:
+
+                # This run's own schedule for every remaining block -
+                # kept before the merge overwrites anything.
+                per_run.append({
+                    "scheduling_time": run_str,
+                    "timestamp": timestamp,
+                    "scheduled_mw": round(float(value) / 1000, 4),
+                })
+
                 schedule[timestamp] = {
                     "scheduled_kw": float(value),
                     "scheduled_at": run_str,
@@ -136,7 +156,7 @@ def build_schedule(data, day, provider):
         for ts, info in sorted(schedule.items())
     ]
 
-    return pd.DataFrame(rows), pd.DataFrame(run_log)
+    return pd.DataFrame(rows), pd.DataFrame(run_log), pd.DataFrame(per_run)
 
 
 def main():
@@ -148,7 +168,7 @@ def main():
 
     data = load_data()
 
-    schedule, run_log = build_schedule(data, day, provider)
+    schedule, run_log, per_run = build_schedule(data, day, provider)
 
     if schedule.empty:
         print(f"No schedule could be built for {day}.")
@@ -197,6 +217,49 @@ def main():
     log_path = out_dir / f"day_schedule_{day}_run_log.csv"
     run_log.to_csv(log_path, index=False)
 
+    # ---- each scheduling time's OWN schedule, scored on its own ----
+    per_run = per_run.merge(actual, on="timestamp", how="left")
+    per_run = per_run.rename(columns={"active_power_kw": "actual_kw"})
+
+    if "is_real_measurement" in per_run.columns:
+        per_run["actual_is_real"] = per_run["is_real_measurement"].fillna(False)
+        per_run = per_run.drop(columns=["is_real_measurement"])
+    else:
+        per_run["actual_is_real"] = per_run["actual_kw"].notna()
+
+    per_run.insert(1, "block", per_run["timestamp"].map(block_number))
+    per_run.insert(2, "block_time", per_run["timestamp"].dt.strftime("%H:%M"))
+    per_run["actual_mw"] = (per_run["actual_kw"] / 1000).round(4)
+    per_run["error_mw"] = (per_run["scheduled_mw"] - per_run["actual_mw"]).round(4)
+    per_run = per_run.drop(columns=["actual_kw"])
+
+    per_run_path = out_dir / f"day_schedule_{day}_per_run.csv"
+    per_run.to_csv(per_run_path, index=False)
+
+    capacity_mw_ = CAPACITY_KW / 1000
+
+    per_run_scores = []
+    for run_str, group in per_run.groupby("scheduling_time", sort=False):
+        g = group[group["actual_is_real"] & group["actual_mw"].notna()]
+        if g.empty:
+            continue
+        per_run_scores.append({
+            "scheduling_time": run_str,
+            "blocks_scheduled": len(group),
+            "blocks_scored": len(g),
+            "deviation_pct": round(metrics.average_percentage_deviation(
+                g["scheduled_mw"], g["actual_mw"], capacity_mw_), 2),
+            "mae_mw": round(metrics.mean_absolute_error(
+                g["scheduled_mw"], g["actual_mw"]), 4),
+            "rmse_mw": round(metrics.root_mean_squared_error(
+                g["scheduled_mw"], g["actual_mw"]), 4),
+            "scheduled_energy_mwh": round(group["scheduled_mw"].sum() * 0.25, 3),
+        })
+
+    per_run_scores = pd.DataFrame(per_run_scores)
+    scores_path = out_dir / f"day_schedule_{day}_per_run_scores.csv"
+    per_run_scores.to_csv(scores_path, index=False)
+
     # ---- printed summary ----
     print("=" * 84)
     print(f"RECONSTRUCTED DAY SCHEDULE - {PLANT_NAME} - {day}")
@@ -209,6 +272,11 @@ def main():
     print("HOW THE DAY WAS BUILT")
     print("-" * 84)
     print(run_log.to_string(index=False))
+    print()
+
+    print("EACH SCHEDULING TIME'S OWN SCHEDULE, SCORED SEPARATELY")
+    print("-" * 84)
+    print(per_run_scores.to_string(index=False))
     print()
 
     print("SCHEDULE (MW)")
@@ -285,9 +353,11 @@ def main():
     summary.to_csv(summary_path, index=False)
 
     print()
-    print(f"Saved schedule : {schedule_path}")
-    print(f"Saved run log  : {log_path}")
-    print(f"Saved summary  : {summary_path}")
+    print(f"Saved schedule     : {schedule_path}")
+    print(f"Saved run log      : {log_path}")
+    print(f"Saved summary      : {summary_path}")
+    print(f"Saved per-run      : {per_run_path}")
+    print(f"Saved per-run score: {scores_path}")
 
 
 if __name__ == "__main__":
