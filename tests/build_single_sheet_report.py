@@ -102,7 +102,8 @@ def main():
     ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=total_cols)
     c = ws.cell(row=1, column=1,
                 value=f"{PLANT} - Reconstructed Day Schedule - {DAY}   "
-                      f"(all values in MW, installed capacity {CAPACITY_MW} MW)")
+                      f"(blocks in kW, summary in MW, installed capacity "
+                      f"{CAPACITY_MW} MW)")
     c.font = F_TITLE
     c.alignment = CENTER
     ws.row_dimensions[1].height = 20
@@ -114,9 +115,13 @@ def main():
     c.font = F_SUB
 
     # ---------------- header ----------------
+    # Per-block values are shown in kW: at ~0.9 MW a block, MW forces four
+    # decimals to stay readable, while kW reads as whole numbers. Blocks are
+    # numbered 1..N for this report rather than by their position in the
+    # 96-block day, so the first scheduled block is 1.
     HEAD = 4
-    labels = (["Block", "Time"] + run_times
-              + ["Final (MW)", "Actual (MW)", "Error (MW)", "Set by run"])
+    labels = (["Block", "Time"] + [f"{rt} (kW)" for rt in run_times]
+              + ["Final (kW)", "Actual (kW)", "Error (kW)", "Set by run"])
 
     for i, label in enumerate(labels, start=1):
         cell = ws.cell(row=HEAD, column=i, value=label)
@@ -136,35 +141,43 @@ def main():
     start = HEAD + 1
     blocks = list(base.index)
 
-    for r, block in enumerate(blocks, start=start):
+    KW = 1000.0
+    KW_FMT = "0.0"
+    KW_ERR_FMT = "0.0;-0.0"
+
+    for r, (seq, block) in enumerate(enumerate(blocks, start=1), start=start):
 
         rec = base.loc[block]
         unscored = not bool(rec["actual_is_real"])
 
-        ws.cell(row=r, column=1, value=int(block))
+        ws.cell(row=r, column=1, value=seq)
         ws.cell(row=r, column=2, value=rec["block_time"])
 
         for i, rt in enumerate(run_times):
             value = matrix.loc[block, rt] if rt in matrix.columns else None
             if pd.isna(value):
                 value = None
-            cell = ws.cell(row=r, column=first_run_col + i, value=value)
+            cell = ws.cell(
+                row=r, column=first_run_col + i,
+                value=None if value is None else round(float(value) * KW, 1),
+            )
             if value is not None:
-                cell.number_format = "0.0000"
+                cell.number_format = KW_FMT
                 if rt == rec["scheduled_at"]:
                     cell.fill = FILL_OWNER
                     cell.font = F_OWNER
 
         ws.cell(row=r, column=col_final,
-                value=float(rec["scheduled_mw"])).number_format = "0.0000"
+                value=round(float(rec["scheduled_mw"]) * KW, 1)
+                ).number_format = KW_FMT
 
-        actual = None if pd.isna(rec["actual_mw"]) else float(rec["actual_mw"])
-        error = None if pd.isna(rec["error_mw"]) else float(rec["error_mw"])
+        actual = None if pd.isna(rec["actual_mw"]) else round(float(rec["actual_mw"]) * KW, 1)
+        error = None if pd.isna(rec["error_mw"]) else round(float(rec["error_mw"]) * KW, 1)
 
-        ws.cell(row=r, column=col_actual, value=actual).number_format = "0.0000"
+        ws.cell(row=r, column=col_actual, value=actual).number_format = KW_FMT
 
         ec = ws.cell(row=r, column=col_error, value=error)
-        ec.number_format = "0.0000;-0.0000"
+        ec.number_format = KW_ERR_FMT
         if error is not None:
             ec.font = F_POS if error > 0 else F_NEG
 
@@ -219,9 +232,9 @@ def main():
     # stays in MW and can be checked against the 5.1 MW rating; the TOTAL
     # must be MWh, since power cannot be added up.
     summary_rows = [
-        ("AVERAGE", "MW", avg_predicted, avg_actual, avg_predicted - avg_actual, "0.0000"),
-        ("SUM", "MW", sum_predicted, sum_actual, sum_error, "0.0000"),
-        ("TOTAL", "MWh", energy_predicted, energy_actual, energy_error, "0.000"),
+        ("AVERAGE", "MW", avg_predicted, avg_actual, avg_predicted - avg_actual, "0.000"),
+        ("PEAK", "MW", peak_predicted, peak_actual, peak_predicted - peak_actual, "0.000"),
+        ("TOTAL", "MW", sum_predicted, sum_actual, sum_error, "0.000"),
     ]
 
     trow = last_row
@@ -253,38 +266,29 @@ def main():
             cell.border = BOX
 
     ws.cell(row=trow + 1, column=1,
-            value=f"All three rows cover the same {len(scored)} blocks with a real meter "
-                  f"reading. AVERAGE (MW) is the day's mean output and sits below the "
-                  f"{CAPACITY_MW} MW rating. SUM (MW) is the arithmetic column total - "
-                  "useful for checking the columns add up, but it is not a power level, "
-                  "since no instant of the day reached it. TOTAL (MWh) is the electricity "
-                  "actually generated; each block is 15 minutes, so MWh = SUM x 0.25."
+            value=f"All rows cover the same {len(scored)} blocks that have a real meter "
+                  f"reading. AVERAGE and PEAK are power levels and sit below the "
+                  f"{CAPACITY_MW} MW rating, as every individual block does. TOTAL adds the "
+                  f"{len(scored)} block values together, so it is naturally far larger than "
+                  "any single reading - the rating applies per block, never to a total. "
+                  f"In energy terms the day was {energy_actual:.3f} MWh actual against "
+                  f"{energy_predicted:.3f} MWh predicted (TOTAL x 0.25 h per block)."
             ).font = F_NOTE
 
     mrow = trow + 3
     ws.cell(row=mrow, column=1, value="ACCURACY vs ACTUAL METER DATA").font = F_SECTION
 
     rows = [
-        ("Blocks scored (real meter readings)", len(scored), "0"),
-        (f"--- POWER, in MW (plant rating {CAPACITY_MW} MW) ---", None, None),
-        ("Average predicted (MW)", round(avg_predicted, 4), "0.0000"),
-        ("Average actual (MW)", round(avg_actual, 4), "0.0000"),
-        ("Peak predicted (MW)", round(peak_predicted, 4), "0.0000"),
-        ("Peak actual (MW)", round(peak_actual, 4), "0.0000"),
-        ("Mean absolute error (MW)", round(mae, 4), "0.0000"),
-        ("Root mean squared error (MW)", round(rmse, 4), "0.0000"),
+        ("Average predicted (MW)", round(avg_predicted, 3), "0.000"),
+        ("Average actual (MW)", round(avg_actual, 3), "0.000"),
+        ("Peak predicted (MW)", round(peak_predicted, 3), "0.000"),
+        ("Peak actual (MW)", round(peak_actual, 3), "0.000"),
         ("Average percentage deviation (%)", round(deviation, 2), "0.00"),
-        ("Sum of predicted blocks (MW)", round(sum_predicted, 4), "0.0000"),
-        ("Sum of actual blocks (MW)", round(sum_actual, 4), "0.0000"),
-        ("Sum of error - predicted minus actual (MW)", round(sum_error, 4),
-         "+0.0000;-0.0000"),
-        ("Sum of absolute error (MW)", round(sum_abs_error, 4), "0.0000"),
-        ("--- ENERGY, in MWh (SUM above x 0.25 h per block) ---", None, None),
-        ("Total predicted energy (MWh)", round(energy_predicted, 3), "0.000"),
-        ("Total actual energy (MWh)", round(energy_actual, 3), "0.000"),
-        ("Total error - predicted minus actual (MWh)", round(energy_error, 3),
+        ("Total predicted (MW)", round(sum_predicted, 3), "0.000"),
+        ("Total actual (MW)", round(sum_actual, 3), "0.000"),
+        ("Total error - predicted minus actual (MW)", round(sum_error, 3),
          "+0.000;-0.000"),
-        ("Total absolute error (MWh)", round(energy_abs_error, 3), "0.000"),
+        ("Total absolute error (MW)", round(sum_abs_error, 3), "0.000"),
     ]
 
     for j, (label, value, fmt) in enumerate(rows, start=1):
@@ -310,15 +314,19 @@ def main():
                    "time uses only the Windy clip stored at that time and meter data up to "
                    "block T, then schedules to end of day. Past blocks stay frozen; only "
                    "future blocks are rewritten."),
+        ("Units", f"Each block is shown in kW (1 MW = 1000 kW); the summary rows are in MW. "
+                  f"1000 kW = 1 MW, so a block reading of 894 kW is 0.894 MW."),
         ("Blue cells", "The scheduling run whose value was finally published for that block."),
         ("Blank cells", "That block had already passed when the run executed."),
         ("Orange rows", "No measured meter reading - excluded from every figure above."),
         ("Deviation", f"Mean absolute error as a percentage of the {CAPACITY_MW} MW "
                       "installed capacity."),
-        ("MW vs MWh", "MW is a rate, like speed - every block value must sit below the "
-                      f"{CAPACITY_MW} MW rating. MWh is a quantity, like distance, and is "
-                      "the only correct way to express a day total. Driving at 60 km/h for "
-                      "4 hours gives 240 km, not 240 km/h."),
+        ("Why TOTAL is above 5.1", f"The {CAPACITY_MW} MW rating limits what the plant can "
+                                   "produce at any one moment, and every block obeys it. "
+                                   "TOTAL adds up the whole day's blocks, so it is larger by "
+                                   "nature - the same way a shop selling Rs.100 an hour for "
+                                   "45 hours totals Rs.4500 without ever selling Rs.4500 at "
+                                   "once."),
         ("Total error", "Predicted minus actual. Morning under-forecasts and afternoon "
                         "over-forecasts partly cancel here, so the absolute total is the "
                         "stricter measure."),
@@ -361,23 +369,21 @@ def main():
 
     print(f"written: {target}")
     print(f"one sheet '{ws.title}': {len(blocks)} blocks x {n_run} scheduling times")
-    print(f"  blocks scored          : {len(scored)}")
-    print(f"  POWER  avg predicted   : {avg_predicted:.4f} MW   "
-          f"(peak {peak_predicted:.4f} MW)")
-    print(f"  POWER  avg actual      : {avg_actual:.4f} MW   "
-          f"(peak {peak_actual:.4f} MW)")
-    print(f"  POWER  MAE / RMSE      : {mae:.4f} / {rmse:.4f} MW")
-    print(f"  POWER  deviation       : {deviation:.2f}%")
-    print(f"  SUM    predicted       : {sum_predicted:.4f} MW  (column total)")
-    print(f"  SUM    actual          : {sum_actual:.4f} MW  (column total)")
-    print(f"  SUM    error           : {sum_error:+.4f} MW")
-    print(f"  ENERGY total predicted : {energy_predicted:.3f} MWh")
-    print(f"  ENERGY total actual    : {energy_actual:.3f} MWh")
-    print(f"  ENERGY total error     : {energy_error:+.3f} MWh")
-    print(f"  ENERGY absolute error  : {energy_abs_error:.3f} MWh")
+    print(f"  blocks numbered 1..{len(blocks)}, values in kW")
+    print(f"  average predicted      : {avg_predicted:.3f} MW")
+    print(f"  average actual         : {avg_actual:.3f} MW")
+    print(f"  peak predicted         : {peak_predicted:.3f} MW")
+    print(f"  peak actual            : {peak_actual:.3f} MW")
+    print(f"  deviation              : {deviation:.2f}%")
+    print(f"  total predicted        : {sum_predicted:.3f} MW")
+    print(f"  total actual           : {sum_actual:.3f} MW")
+    print(f"  total error            : {sum_error:+.3f} MW")
+    print(f"  total absolute error   : {sum_abs_error:.3f} MW")
     print()
-    print(f"  sanity: every MW figure below plant rating {CAPACITY_MW} MW -> "
+    print(f"  sanity - every BLOCK below the {CAPACITY_MW} MW rating: "
           f"{max(peak_predicted, peak_actual) <= CAPACITY_MW}")
+    print(f"  (totals add {len(scored)} blocks together, so they exceed the rating "
+          f"by nature; in energy terms {energy_actual:.3f} MWh actual)")
 
 
 if __name__ == "__main__":
