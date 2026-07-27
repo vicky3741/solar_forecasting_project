@@ -100,6 +100,13 @@ class Scheduler:
             "subprocess_timeout_seconds", 180
         )
 
+        # A forecast run takes ~40s (model load, S3 pull, vision, blend,
+        # push); this is a hard kill for one that hangs, generous enough
+        # to survive a slow network day.
+        self.forecast_timeout = settings.get("scheduler", {}).get(
+            "forecast_timeout_seconds", 600
+        )
+
         # Fixed localhost port used purely as a single-instance lock
         # (see acquire_single_instance_lock). Not a network service.
         self.lock_port = settings.get("scheduler", {}).get(
@@ -147,6 +154,44 @@ class Scheduler:
 
     # --------------------------------------------------
 
+    def run_forecast(self):
+        """
+        Runs one forecast in its own process, for the same reason the
+        capture gets one: torch and the Chronos weights cost ~450 MB,
+        and CPython never returns freed arenas to the OS. Running
+        in-process left this scheduler holding 577 MB after only three
+        runs (2026-07-27), leaving ~283 MB free - less than Chromium
+        needs for the next capture, so a 7-run day would eventually
+        have starved itself. A separate process gives every byte back
+        on exit.
+        """
+
+        try:
+            result = subprocess.run(
+                [sys.executable, "-m", "modules.orchestrator.pipeline"],
+                capture_output=True,
+                text=True,
+                timeout=self.forecast_timeout
+            )
+
+            if result.returncode == 0:
+                self.logger.info("Forecast run completed")
+            else:
+                self.logger.error(
+                    f"Forecast exited {result.returncode}: "
+                    f"{result.stderr.strip()[-500:]}"
+                )
+
+        except subprocess.TimeoutExpired:
+            self.logger.error(
+                f"Forecast timed out after {self.forecast_timeout}s"
+            )
+
+        except Exception as error:
+            self.logger.error(f"Forecast could not start: {error}")
+
+    # --------------------------------------------------
+
     def run_now(self):
 
         self.logger.info("Scheduled trigger fired")
@@ -155,20 +200,9 @@ class Scheduler:
         # machine to itself before the forecast loads Chronos.
         self.capture_video()
 
-        try:
-            # Imported AND built here rather than at module scope (see the
-            # note by the imports): torch/chronos cost ~450 MB just to
-            # import, and that memory is only needed while a run is
-            # actually in flight.
-            from modules.orchestrator.pipeline import Orchestrator
+        self.run_forecast()
 
-            Orchestrator().run()
-
-        except Exception as error:
-            self.logger.error(f"Scheduled run failed: {error}")
-
-        finally:
-            gc.collect()
+        gc.collect()
 
     # --------------------------------------------------
 

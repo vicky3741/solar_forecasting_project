@@ -393,3 +393,40 @@ class Orchestrator:
         self.logger.info(f"Forecast run complete for {run_time}")
 
         return forecast
+
+
+# --------------------------------------------------
+
+def main():
+    """
+    Entry point so ONE forecast run can execute as its own
+    short-lived process (`python -m modules.orchestrator.pipeline`),
+    the same pattern the Windy capture already uses.
+
+    Loading torch and the Chronos weights costs ~450 MB, and CPython
+    does not return freed arenas to the OS - so running the forecast
+    in-process left the long-lived scheduler holding ~577 MB after
+    only three runs on 2026-07-27, squeezing the free memory Chromium
+    needs for the next capture down to ~283 MB. Exiting the process
+    hands every byte back to the OS, so the scheduler returns to its
+    ~28 MB idle footprint after each run and the box cannot slowly
+    starve itself over a 7-run day.
+
+    Exit code 0 = forecast published, 1 = run failed.
+    """
+
+    orchestrator = Orchestrator()
+
+    try:
+        orchestrator.run()
+
+    except Exception as error:
+        orchestrator.logger.error(f"Forecast run failed: {error}")
+        return 1
+
+    return 0
+
+
+if __name__ == "__main__":
+    import sys
+    sys.exit(main())
