@@ -196,6 +196,15 @@ def main():
     peak_predicted = float(scored["scheduled_mw"].max())
     peak_actual = float(scored["actual_mw"].max())
 
+    # Arithmetic column totals, requested so the MW columns can be
+    # checked by adding them up. Not a power level - no instant of the
+    # day reached this - and exactly 4x the MWh figure, since each block
+    # is a quarter hour.
+    sum_predicted = float(scored["scheduled_mw"].sum())
+    sum_actual = float(scored["actual_mw"].sum())
+    sum_error = sum_predicted - sum_actual
+    sum_abs_error = float(scored["error_mw"].abs().sum())
+
     energy_predicted = float(scored["scheduled_mw"].sum() * BLOCK_HOURS)
     energy_actual = float(scored["actual_mw"].sum() * BLOCK_HOURS)
     energy_error = energy_predicted - energy_actual
@@ -211,6 +220,7 @@ def main():
     # must be MWh, since power cannot be added up.
     summary_rows = [
         ("AVERAGE", "MW", avg_predicted, avg_actual, avg_predicted - avg_actual, "0.0000"),
+        ("SUM", "MW", sum_predicted, sum_actual, sum_error, "0.0000"),
         ("TOTAL", "MWh", energy_predicted, energy_actual, energy_error, "0.000"),
     ]
 
@@ -243,10 +253,13 @@ def main():
             cell.border = BOX
 
     ws.cell(row=trow + 1, column=1,
-            value=f"Both rows cover the same {len(scored)} blocks that have a real meter "
-                  "reading. AVERAGE is in MW and must sit below the plant's "
-                  f"{CAPACITY_MW} MW rating; TOTAL is in MWh, because power (MW) cannot be "
-                  "added up - each block is 15 minutes, so MWh = MW x 0.25.").font = F_NOTE
+            value=f"All three rows cover the same {len(scored)} blocks with a real meter "
+                  f"reading. AVERAGE (MW) is the day's mean output and sits below the "
+                  f"{CAPACITY_MW} MW rating. SUM (MW) is the arithmetic column total - "
+                  "useful for checking the columns add up, but it is not a power level, "
+                  "since no instant of the day reached it. TOTAL (MWh) is the electricity "
+                  "actually generated; each block is 15 minutes, so MWh = SUM x 0.25."
+            ).font = F_NOTE
 
     mrow = trow + 3
     ws.cell(row=mrow, column=1, value="ACCURACY vs ACTUAL METER DATA").font = F_SECTION
@@ -261,7 +274,12 @@ def main():
         ("Mean absolute error (MW)", round(mae, 4), "0.0000"),
         ("Root mean squared error (MW)", round(rmse, 4), "0.0000"),
         ("Average percentage deviation (%)", round(deviation, 2), "0.00"),
-        ("--- ENERGY, in MWh (a total cannot be in MW) ---", None, None),
+        ("Sum of predicted blocks (MW)", round(sum_predicted, 4), "0.0000"),
+        ("Sum of actual blocks (MW)", round(sum_actual, 4), "0.0000"),
+        ("Sum of error - predicted minus actual (MW)", round(sum_error, 4),
+         "+0.0000;-0.0000"),
+        ("Sum of absolute error (MW)", round(sum_abs_error, 4), "0.0000"),
+        ("--- ENERGY, in MWh (SUM above x 0.25 h per block) ---", None, None),
         ("Total predicted energy (MWh)", round(energy_predicted, 3), "0.000"),
         ("Total actual energy (MWh)", round(energy_actual, 3), "0.000"),
         ("Total error - predicted minus actual (MWh)", round(energy_error, 3),
@@ -350,6 +368,9 @@ def main():
           f"(peak {peak_actual:.4f} MW)")
     print(f"  POWER  MAE / RMSE      : {mae:.4f} / {rmse:.4f} MW")
     print(f"  POWER  deviation       : {deviation:.2f}%")
+    print(f"  SUM    predicted       : {sum_predicted:.4f} MW  (column total)")
+    print(f"  SUM    actual          : {sum_actual:.4f} MW  (column total)")
+    print(f"  SUM    error           : {sum_error:+.4f} MW")
     print(f"  ENERGY total predicted : {energy_predicted:.3f} MWh")
     print(f"  ENERGY total actual    : {energy_actual:.3f} MWh")
     print(f"  ENERGY total error     : {energy_error:+.3f} MWh")
