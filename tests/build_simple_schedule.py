@@ -27,6 +27,8 @@ from pathlib import Path
 
 import pandas as pd
 from openpyxl import Workbook
+from openpyxl.chart import LineChart, Reference
+from openpyxl.chart.axis import ChartLines
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 
 from config.config import settings
@@ -81,14 +83,21 @@ def main():
     # schedule to compare against and those rows were only empty space.
     merged = merged[merged["scheduled_mw"].notna()].reset_index(drop=True)
 
-    # The date is stated once in the title, so the rows carry time only.
+    # MW throughout - the plant is rated in MW and mixed units caused
+    # repeated confusion. Per-block deviation sits beside the error so
+    # each block's own accuracy is visible, not just the day average.
+    capacity_mw = CAPACITY_KW / 1000
+
     out = pd.DataFrame({
         "Time": merged["timestamp"].dt.strftime("%H:%M"),
-        "Scheduled Power (kW)": (merged["scheduled_mw"] * 1000).round(2),
-        "Actual Power (kW)": merged["active_power_kw"].round(2),
+        "Scheduled (MW)": merged["scheduled_mw"].round(4),
+        "Actual (MW)": (merged["active_power_kw"] / 1000).round(4),
     })
-    out["Error (kW)"] = (
-        out["Scheduled Power (kW)"] - out["Actual Power (kW)"]
+    out["Error (MW)"] = (
+        out["Scheduled (MW)"] - out["Actual (MW)"]
+    ).round(4)
+    out["Deviation (%)"] = (
+        out["Error (MW)"].abs() / capacity_mw * 100
     ).round(2)
 
     csv_path = OUT_DIR / f"Schedule_vs_Meter_{DAY}.csv"
@@ -110,10 +119,18 @@ def main():
     fill_grey = PatternFill("solid", fgColor=GREY)
 
     ws.cell(row=1, column=1,
-            value=f"{PLANT} - Scheduled vs Actual - {DAY}  (15-minute blocks, kW)"
+            value=f"{PLANT} - Scheduled vs Actual - {DAY}  "
+                  f"(15-minute blocks, all values in MW)"
             ).font = Font(name=FONT, size=12, bold=True, color=NAVY)
 
     headers = list(out.columns)
+    formats = {
+        "Scheduled (MW)": "0.0000",
+        "Actual (MW)": "0.0000",
+        "Error (MW)": "0.0000;-0.0000",
+        "Deviation (%)": "0.00",
+    }
+
     for i, h in enumerate(headers, start=1):
         cell = ws.cell(row=3, column=i, value=h)
         cell.font = f_head
@@ -130,19 +147,19 @@ def main():
             cell.font = f_body
             cell.border = box
             cell.alignment = center
-            if i > 1:
-                cell.number_format = "0.00"
+            if key in formats:
+                cell.number_format = formats[key]
 
     last = 3 + len(out)
 
     # ---------------- accuracy, in MW only ----------------
     # Blocks the meter actually measured; the trailing blocks after 18:00
     # are scheduled but have no reading yet, so they cannot be scored.
-    both = out.dropna(subset=["Scheduled Power (kW)", "Actual Power (kW)"])
+    both = out.dropna(subset=["Scheduled (MW)", "Actual (MW)"])
 
-    scheduled_mw = both["Scheduled Power (kW)"] / 1000
-    actual_mw = both["Actual Power (kW)"] / 1000
-    error_mw = both["Error (kW)"] / 1000
+    scheduled_mw = both["Scheduled (MW)"]
+    actual_mw = both["Actual (MW)"]
+    error_mw = both["Error (MW)"]
 
     total_predicted = float(scheduled_mw.sum())
     total_actual = float(actual_mw.sum())
@@ -150,7 +167,8 @@ def main():
     total_abs_error = float(error_mw.abs().sum())
     mae = float(error_mw.abs().mean())
     rmse = float((error_mw ** 2).mean() ** 0.5)
-    deviation = mae / (CAPACITY_KW / 1000) * 100
+    deviation = mae / capacity_mw * 100
+    worst = both.loc[both["Deviation (%)"].idxmax()]
 
     mrow = last + 2
     ws.cell(row=mrow, column=1, value="ACCURACY vs ACTUAL METER DATA").font = Font(
@@ -160,16 +178,18 @@ def main():
     # MWh, and this report is MW-only by request.
     metrics = [
         ("Blocks scored (real meter readings)", len(both), "0"),
-        ("Average predicted (MW)", round(float(scheduled_mw.mean()), 3), "0.000"),
-        ("Average actual (MW)", round(float(actual_mw.mean()), 3), "0.000"),
-        ("Peak predicted (MW)", round(float(scheduled_mw.max()), 3), "0.000"),
-        ("Peak actual (MW)", round(float(actual_mw.max()), 3), "0.000"),
-        ("Total predicted (MW)", round(total_predicted, 3), "0.000"),
-        ("Total actual (MW)", round(total_actual, 3), "0.000"),
-        ("Total error - predicted minus actual (MW)", round(total_error, 3),
-         "+0.000;-0.000"),
-        ("Total absolute error (MW)", round(total_abs_error, 3), "0.000"),
+        ("Average predicted (MW)", round(float(scheduled_mw.mean()), 4), "0.0000"),
+        ("Average actual (MW)", round(float(actual_mw.mean()), 4), "0.0000"),
+        ("Peak predicted (MW)", round(float(scheduled_mw.max()), 4), "0.0000"),
+        ("Peak actual (MW)", round(float(actual_mw.max()), 4), "0.0000"),
+        ("Total predicted (MW)", round(total_predicted, 4), "0.0000"),
+        ("Total actual (MW)", round(total_actual, 4), "0.0000"),
+        ("Total error - predicted minus actual (MW)", round(total_error, 4),
+         "+0.0000;-0.0000"),
+        ("Total absolute error (MW)", round(total_abs_error, 4), "0.0000"),
         ("Average percentage deviation (%)", round(deviation, 2), "0.00"),
+        ("Worst block deviation (%)", round(float(worst["Deviation (%)"]), 2), "0.00"),
+        ("Worst block time", str(worst["Time"]), None),
         ("Mean absolute error (MW)", round(mae, 4), "0.0000"),
         ("Root mean squared error (MW)", round(rmse, 4), "0.0000"),
     ]
@@ -178,14 +198,40 @@ def main():
         ws.cell(row=mrow + j, column=1, value=label).font = f_bold
         cell = ws.cell(row=mrow + j, column=3, value=value)
         cell.font = f_body
-        cell.number_format = fmt
+        if fmt:
+            cell.number_format = fmt
         cell.fill = fill_grey
         cell.border = box
         cell.alignment = center
 
+    # ---------------- scheduled vs actual, as a line chart ----------------
+    # The morning-under / afternoon-over pattern is obvious in a chart and
+    # invisible in a column of numbers.
+    chart = LineChart()
+    chart.title = f"Scheduled vs Actual - {DAY}"
+    chart.style = 2
+    chart.height = 9
+    chart.width = 24
+    chart.y_axis.title = "MW"
+    chart.x_axis.title = "Time"
+    chart.y_axis.majorGridlines = ChartLines()
+
+    data = Reference(ws, min_col=2, max_col=3, min_row=3, max_row=last)
+    times = Reference(ws, min_col=1, min_row=4, max_row=last)
+    chart.add_data(data, titles_from_data=True)
+    chart.set_categories(times)
+
+    for series, colour in zip(chart.series, ("1F4E79", "C00000")):
+        series.smooth = False
+        series.graphicalProperties.line.solidFill = colour
+        series.graphicalProperties.line.width = 22000   # EMU, ~1.75pt
+        series.marker.symbol = "none"
+
+    ws.add_chart(chart, f"G3")
+
     ws.column_dimensions["A"].width = 34
-    for col in "BCD":
-        ws.column_dimensions[col].width = 19
+    for col in "BCDE":
+        ws.column_dimensions[col].width = 17
     ws.freeze_panes = ws.cell(row=4, column=1)
 
     xlsx_path = OUT_DIR / f"Schedule_vs_Meter_{DAY}.xlsx"
@@ -207,6 +253,8 @@ def main():
     print("ACCURACY (MW only)")
     for label, value, _fmt in metrics:
         print(f"  {label:<44} {value}")
+    print()
+    print("  line chart embedded at cell G3")
     print()
     print(f"saved CSV  : {csv_path}")
     print(f"saved Excel: {target}")
