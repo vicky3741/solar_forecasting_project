@@ -6,6 +6,45 @@ intraday generation schedule at 15-minute resolution (96 blocks), refreshed
 
 ---
 
+## Flow at a glance
+
+```mermaid
+flowchart TD
+    S["Scheduler<br/>7 runs a day, 06:45 to 15:45"]
+
+    S --> CAP["Capture<br/>20s Windy satellite clip<br/>Playwright + Chromium"]
+    CAP --> S3[("Team S3 bucket")]
+
+    S --> PRE["Preprocess meter data<br/>validate, outliers, 15-min grid"]
+    S3 --> PRE
+
+    PRE --> Q{"How sunny will the<br/>rest of today be?<br/>answered as % of a perfect day"}
+
+    Q --> W["Weather<br/>ECMWF via Open-Meteo<br/>weight 0.65"]
+    Q --> P["Persistence<br/>latest measured reading"]
+    Q --> CH["Chronos<br/>bolt-small, weight 0.20"]
+    Q --> V["Cloud video<br/>Gemini reads 10 frames"]
+
+    V -->|"adjusts, ±4% max"| P
+
+    W --> BL["Weighted average<br/>one clear-sky index per block"]
+    P --> BL
+    CH --> BL
+
+    BL --> CS["Multiply by clear-sky curve<br/>pvlib Ineichen, PR 0.80<br/>= megawatts per block"]
+    CS --> CB["Case-based correction<br/>40 analogue situations, half strength"]
+
+    CB --> OUT["4 output files<br/>forecast, archive, schedule, validation"]
+    OUT --> S3
+    OUT --> APP["FastAPI dashboard<br/>+ 3 JSON endpoints"]
+```
+
+Capture and forecast run as two separate short-lived processes, capture
+first. The browser and the Chronos model must never hold their peak memory
+at the same time on the deployment box.
+
+---
+
 ## 1. The core idea
 
 A solar plant's output swings from zero to peak and back every single day.
