@@ -31,6 +31,24 @@ vision:
   # --- Gemini (Google, free tier) ---
   api_key: ""              # loaded from .env GOOGLE_API_KEY
   model: gemini-3.5-flash
+  # The free tier caps requests PER DAY PER MODEL, and gemini-3.5-flash
+  # allows only 20 - one backfilled day costs 7, so three days of
+  # reconstruction exhausts it and every later run silently loses its
+  # vision signal (this is what happened on 2026-07-30). Because the
+  # quota is per model, each entry below carries its own separate budget:
+  # on a per-day refusal the client moves down the list rather than
+  # abandoning the run. Order = most to least capable.
+  #
+  # Every name here was verified by calling it with this key on
+  # 2026-07-30. Do not add names from models.list() without calling them:
+  # it advertises gemini-2.5-flash and gemini-2.5-flash-lite, which both
+  # answer 404 "no longer available to new users", and gemini-2.0-flash
+  # /-lite, which report a free-tier limit of 0.
+  fallback_models:
+    - gemini-3-flash-preview
+    - gemini-3.5-flash-lite
+    - gemini-flash-latest
+    - gemini-flash-lite-latest
   # --- OpenAI / OpenRouter (any OpenAI-compatible vision model) ---
   openai_api_key: ""       # loaded from .env OPENAI_API_KEY or OPENROUTER_API_KEY
   openai_model: gpt-4o     # OpenAI direct: gpt-4o / gpt-4o-mini.
