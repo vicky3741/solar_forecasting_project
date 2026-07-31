@@ -147,6 +147,53 @@ The scheduler (`modules/scheduler/scheduler.py`) can run the orchestrator
 automatically at the 7 official times: 06:45, 08:15, 09:45, 11:15, 12:45,
 14:15, 15:45 IST.
 
+## Building a day's report (start here)
+
+`tests/` holds three kinds of file, and only the first kind is what you
+want day to day:
+
+**1. The report pipeline.** Run these two, in this order, for any finished
+day. The first rebuilds the schedule, the second turns it into the
+workbook that goes to the mentor:
+
+```bash
+# Step 1 - reconstruct the day's schedule (needs meter data in
+# data/historical/ and the day's Windy clips, local or in S3)
+python -m tests.generate_schedule_for_day 2026-07-31
+
+# Step 2 - the mentor-facing workbook: per-block MW, DSM penalty,
+# how many blocks fell outside the deviation band, Enercast alongside
+python -m tests.build_penalty_report 2026-07-31
+```
+
+`build_penalty_report.py` writes formulas, not baked-in numbers, so the
+saved file shows blanks until Excel (or LibreOffice) opens and calculates
+it once. Open it and save, and the values are cached from then on.
+
+`tests/build_simple_schedule.py` is the plainer variant of step 2 - same
+data, no penalty columns - when a bare scheduled-vs-actual sheet is all
+that is wanted.
+
+Add a day's Enercast file as `data/enercast/Sirmour_<D>july_enercast.csv`
+(columns `Block, Time, Scheduled MW, ...`) and both reports pick it up
+automatically; leave it out and they simply omit the Enercast columns.
+
+**2. Real unit/smoke tests** - `test_preprocessing.py`, `test_predictor.py`,
+`test_evaluator.py`, `test_fusion.py`, `test_clearsky.py`,
+`test_orchestrator.py`, `test_s3.py`, `test_vision.py`. Run any of them to
+check a module still works.
+
+**3. Tuning experiments** - `test_weather_bias_experiment.py`,
+`test_case_based_experiment.py`, `test_residual_experiment.py`,
+`test_walkforward_experiment.py` and friends. These are the evidence
+behind the tuned numbers in `config/settings.yaml`; each setting's comment
+names the experiment that produced it. You do not run these to make a
+report - only to re-validate a setting after changing the model.
+
+**Every tuned constant lives in `config/settings.yaml`**, with a comment
+saying what tuned it and when. Change behaviour there rather than in the
+modules.
+
 ## Dashboard
 
 `python app.py` → http://localhost:8000
