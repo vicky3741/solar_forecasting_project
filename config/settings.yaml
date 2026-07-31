@@ -59,6 +59,25 @@ vision:
   # or use https://openrouter.ai/api/v1 for OpenRouter's free vision models.
   openai_base_url: "https://models.inference.ai.azure.com"
 
+  # How far from a scheduling time a clip may have been recorded and still
+  # count as THAT run's clip. 5 min suits the automated capture, which fires
+  # within seconds of each run time. Manual captures drift: the 2026-07-30
+  # hand-recorded set landed at 09:46, 11:17, 13:03, 14:15 and 15:32, so at
+  # 5 min only 3 of 5 clips would have been usable and two good recordings
+  # would have been silently discarded. 20 min accepts the whole set (the
+  # widest drift is 13:03 against the 12:45 run) while still being far short
+  # of the 90 min between scheduling times, so a clip can never be claimed
+  # by the wrong run.
+  video_match_tolerance_minutes: 20
+  # Whether a run with no local clip may fall back to the shared S3 bucket.
+  # Turn OFF when a day must be evaluated on a specific hand-picked set,
+  # otherwise the bucket's own auto-captures quietly fill the gaps and the
+  # report no longer reflects the clips it claims to use. Was OFF only for
+  # the 2026-07-30 report (built on five hand-recorded clips); back ON
+  # (the normal setting) since our own 7x/day EC2 automation is the thing
+  # uploading the real captures to this bucket for every other day.
+  use_s3_video_fallback: true
+
   temperature: 0.2
   max_output_tokens: 8192  # gemini-3.5-flash is a thinking model: internal reasoning consumes output tokens before the visible JSON, so a low cap truncates the response mid-JSON. Also used as OpenAI max_tokens.
 
@@ -81,6 +100,15 @@ forecast_model:
   provider: chronos
   model: amazon/chronos-bolt-small   # fast CPU-friendly zero-shot model; "amazon/chronos-base" was not a real HF model id
   device: cpu
+  # MENTOR GUIDANCE 2026-07-31: historical generation data is a model input
+  # and must be configurable, capped at the last 3-4 days - a longer window
+  # risks the model overfitting to past patterns. Before this, Chronos's
+  # context was every reading in data/historical/ with no limit at all
+  # (grows every day). Counts calendar days ending on the run day (today
+  # counts as one), not a fixed hour count, so day-boundary gaps in the
+  # data do not silently widen the window. 0 or omitted = unbounded
+  # (pre-2026-07-31 behaviour) - only for A/B comparison, never for a real run.
+  context_lookback_days: 4
 
 hybrid_blend:
   chronos_weight: 0.2      # TUNED 2026-07-18 on 7 days, CONFIRMED 2026-07-19 on the full 13-day dataset (still the grid optimum). Out-of-sample check: week-1-tuned settings held up on unseen week 2 (7.8% deviation vs 10.0% on the tuned week itself).

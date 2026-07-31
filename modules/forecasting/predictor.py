@@ -91,6 +91,13 @@ class HybridPredictor:
         self.performance_ratio = settings["clearsky"]["performance_ratio"]
         self.weather_weight = settings.get("weather", {}).get("weather_weight", 0.0)
 
+        # Mentor guidance 2026-07-31: cap how much historical generation
+        # data feeds Chronos, so it cannot overfit to an ever-growing
+        # window. 0/absent = unbounded, kept only for comparison.
+        self.context_lookback_days = settings["forecast_model"].get(
+            "context_lookback_days", 4
+        )
+
         # Clear-sky index rarely exceeds ~1.2 even under cloud-enhancement
         # effects; clip any forecasted kt to a sane physical range.
         self.max_clear_sky_index = 1.2
@@ -132,15 +139,27 @@ class HybridPredictor:
 
     def get_clear_sky_index_history(self, dataframe, run_time):
         """
-        Clear-sky index (kt) for every available reading up
-        to run_time, across all historical days. This is the
-        context series Chronos forecasts forward - a bounded,
-        mostly-stationary weather signal, unlike raw power
-        which has a strong sunrise/sunset shape Chronos has
-        no way to learn from a handful of irregular days.
+        Clear-sky index (kt) for every available reading up to
+        run_time. This is the context series Chronos forecasts
+        forward - a bounded, mostly-stationary weather signal,
+        unlike raw power which has a strong sunrise/sunset shape
+        Chronos has no way to learn from a handful of irregular
+        days.
+
+        Capped to the last `context_lookback_days` calendar days
+        (today counts as one) per mentor guidance: an unbounded,
+        ever-growing window risks Chronos overfitting to past
+        patterns rather than reading the current situation.
         """
 
         history = dataframe[dataframe["timestamp"] <= run_time]
+
+        if self.context_lookback_days:
+            window_start = (
+                run_time.normalize()
+                - timedelta(days=self.context_lookback_days - 1)
+            )
+            history = history[history["timestamp"] >= window_start]
 
         with_kt = self.clearsky.compute_clear_sky_index(
             history,

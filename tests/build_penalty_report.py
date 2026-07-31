@@ -1,0 +1,492 @@
+"""
+=========================================================
+Solar Forecasting Project
+Schedule vs Meter + DSM Penalty Report
+=========================================================
+Extends the reconstructed day schedule with the DSM
+(Deviation Settlement Mechanism) slab-based penalty: the
+first 10% of deviation from installed capacity is a free
+band (no penalty), then progressively higher per-kWh rates
+apply for 10-15%, 15-20% and >20% deviation. Matches the
+sheet layout already used for 2026-07-25/27/28/29.
+
+"Deviation" here is Actual minus AI Schedule (the sign the
+DSM regulation uses), the opposite convention from the
+plain Schedule_vs_Meter report's Error (Scheduled - Actual).
+
+Every accuracy/penalty figure is a live formula referencing
+the DSM slab parameters at the bottom of the sheet, so the
+sheet recalculates if the slab rates or capacity ever change.
+
+Run:  python -m tests.build_penalty_report [YYYY-MM-DD]
+=========================================================
+"""
+
+import sys
+from pathlib import Path
+
+import pandas as pd
+from openpyxl import Workbook
+from openpyxl.chart import BarChart, LineChart, Reference
+from openpyxl.formatting.rule import FormulaRule
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+from openpyxl.utils import get_column_letter
+
+from config.config import settings
+from modules.evaluation.evaluator import Evaluator
+from modules.preprocessing.preprocess import DataPreprocessor
+
+DAY = sys.argv[1] if len(sys.argv) > 1 else "2026-07-25"
+SCHEDULE_DIR = Path("outputs/schedules")
+OUT_DIR = Path("outputs/reports")
+
+CAPACITY_MW = settings["plant"]["capacity_mw"]
+PLANT = settings["plant"]["name"]
+BLOCK_ENERGY_FACTOR = 250   # 0.25 h x 1000 kW/MW - MW deviation -> kWh for one block
+
+FONT = "Arial"
+DARK_GREEN = "1B4332"
+RED = "C00000"
+RED_FILL = "FCE4E4"
+BLUE = "1F4E9C"
+BLUE_FILL = "E4EDFA"
+
+# DSM slabs: (label, from_pct, to_pct_or_None, rate_rs_per_kwh)
+SLABS = [
+    ("Slab 1", 0, 10, 0),
+    ("Slab 2", 10, 15, 0.5),
+    ("Slab 3", 15, 20, 0.75),
+    ("Slab 4", 20, None, 1),
+]
+
+
+def block_number(timestamp):
+    """Indian scheduling block number: block 1 is 00:00-00:15."""
+
+    return timestamp.hour * 4 + timestamp.minute // 15 + 1
+
+
+def load_full_day_actual(day):
+    """Every meter reading for the day, not just the scored blocks."""
+
+    path = Path(settings["paths"]["historical_data"]) / f"{day.replace('-', '_')}_SOLAR_INV.csv"
+
+    frame = DataPreprocessor().preprocess(
+        file_path=path,
+        required_columns=["TimeStamp"],
+        timestamp_column="TimeStamp",
+    )
+
+    columns = ["timestamp", "active_power_kw"]
+    if "is_real_measurement" in frame.columns:
+        columns.append("is_real_measurement")
+
+    return frame[columns]
+
+
+def build_rows(day):
+    """
+    Every block from the day's earliest meter reading to the last
+    scheduled block, merging in the reconstructed schedule. Blocks
+    before the first scheduling run get an AI Schedule of 0 (no run
+    has happened yet); blocks with no meter reading yet are left
+    blank rather than guessed.
+    """
+
+    schedule = pd.read_csv(
+        SCHEDULE_DIR / f"day_schedule_{day}.csv", parse_dates=["timestamp"]
+    )
+    actual = load_full_day_actual(day)
+
+    merged = actual.merge(
+        schedule[["timestamp", "scheduled_mw", "scheduled_at"]],
+        on="timestamp", how="outer"
+    ).sort_values("timestamp").reset_index(drop=True)
+
+    merged = merged[merged["timestamp"].dt.date == pd.Timestamp(day).date()]
+
+    # Enercast, side by side, for comparison only - never used to grade our
+    # own forecast (see modules/evaluation/evaluator.py).
+    enercast_day = Evaluator().load_enercast_day(pd.Timestamp(day))
+    if enercast_day is not None:
+        merged = merged.merge(enercast_day, on="timestamp", how="left")
+
+    # Trim to the span that actually has something to show.
+    has_data = merged["active_power_kw"].notna() | merged["scheduled_mw"].notna()
+    merged = merged[has_data.cummax() & has_data[::-1].cummax()[::-1]].reset_index(drop=True)
+
+    # Pre-dawn blocks before the first scheduling run: no forecast has
+    # been made yet, and pre-sunrise output is genuinely ~0.
+    merged["scheduled_mw"] = merged["scheduled_mw"].fillna(0.0)
+
+    return merged
+
+
+def main():
+
+    day = pd.Timestamp(DAY).date()
+    rows = build_rows(DAY)
+    has_enercast = "enercast_kw" in rows.columns and rows["enercast_kw"].notna().any()
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Schedule vs Meter + Penalty"
+
+    thin = Side(style="thin", color="BFBFBF")
+    box = Border(left=thin, right=thin, top=thin, bottom=thin)
+    center = Alignment(horizontal="center")
+    f_head = Font(name=FONT, size=10, bold=True, color="FFFFFF")
+    f_body = Font(name=FONT, size=10)
+    f_section = Font(name=FONT, size=12, bold=True, color=DARK_GREEN)
+    f_label = Font(name=FONT, size=10)
+    f_input = Font(name=FONT, size=10, color="0000FF")
+    fill_head = PatternFill("solid", fgColor=DARK_GREEN)
+
+    headers = ["Block", "Time", "AI Schedule (MW)", "Actual (MW)",
+               "Deviation (MW)", "Deviation % (Capacity)", "Penalty (Rs)", "Scheduled at"]
+
+    if has_enercast:
+        headers += ["Enercast (MW)", "Enercast Deviation (MW)",
+                    "Enercast Deviation % (Capacity)", "Enercast Penalty (Rs)"]
+
+    last_col_letter = get_column_letter(len(headers))
+
+    ws.merge_cells(f"A1:{last_col_letter}1")
+    ws.cell(row=1, column=1,
+            value=f"{PLANT} - AI Schedule vs Actual with DSM Penalty - {day}"
+            ).font = f_section
+    ws.merge_cells(f"A2:{last_col_letter}2")
+
+    if has_enercast:
+        ws.cell(row=2, column=1,
+                value="Enercast is shown alongside for comparison only - our forecast is "
+                      "graded against actual meter data, never against Enercast."
+                ).font = Font(name=FONT, size=9, italic=True, color="595959")
+
+    HEAD = 4
+    for i, h in enumerate(headers, start=1):
+        cell = ws.cell(row=HEAD, column=i, value=h)
+        cell.font = f_head
+        cell.fill = fill_head
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        cell.border = box
+
+    start = HEAD + 1
+
+    # Rows with an actual reading (deviation/penalty can be computed);
+    # tracked so the formulas can be backfilled once the slab parameter
+    # cells below have fixed addresses. Enercast tracked separately since
+    # a block can have Actual without Enercast or vice versa.
+    scored_rows = []
+    enercast_rows = []
+
+    for r, (_, rec) in enumerate(rows.iterrows(), start=start):
+
+        block = block_number(rec["timestamp"])
+        block_end = rec["timestamp"] + pd.Timedelta(minutes=15)
+        time_label = f"{rec['timestamp'].strftime('%H:%M')}-{block_end.strftime('%H:%M')}"
+
+        ws.cell(row=r, column=1, value=block)
+        ws.cell(row=r, column=2, value=time_label)
+
+        ws.cell(row=r, column=3, value=round(float(rec["scheduled_mw"]), 4)
+                 ).number_format = "0.000"
+
+        if pd.notna(rec["active_power_kw"]):
+            actual_mw = round(float(rec["active_power_kw"]) / 1000, 4)
+            ws.cell(row=r, column=4, value=actual_mw).number_format = "0.000"
+
+            ws.cell(row=r, column=5, value=f"=D{r}-C{r}").number_format = "0.000"
+
+            scored_rows.append(r)
+
+        if pd.notna(rec["scheduled_at"]):
+            ws.cell(row=r, column=8, value=str(rec["scheduled_at"]))
+
+        if has_enercast and pd.notna(rec.get("enercast_kw")):
+            enercast_mw = round(float(rec["enercast_kw"]) / 1000, 4)
+            ws.cell(row=r, column=9, value=enercast_mw).number_format = "0.000"
+
+            if pd.notna(rec["active_power_kw"]):
+                ws.cell(row=r, column=10, value=f"=D{r}-I{r}").number_format = "0.000"
+                enercast_rows.append(r)
+
+        for col in range(1, len(headers) + 1):
+            cell = ws.cell(row=r, column=col)
+            cell.border = box
+            cell.alignment = center
+            if cell.font is None or cell.font.sz is None:
+                cell.font = f_body
+
+    last_row = start + len(rows) - 1
+
+    # ---------------- DSM slab parameters (written below the summary) ----------------
+    # Each summary block (AI, and Enercast when present) is a fixed 12
+    # metric rows starting 2 rows below the data; the slab table sits
+    # below whichever summaries are present, with a 1-row gap.
+    SUMMARY_LEN = 12
+    ai_summary_end = last_row + 2 + SUMMARY_LEN
+    if has_enercast:
+        ec_summary_end = ai_summary_end + 2 + SUMMARY_LEN
+        param_row = ec_summary_end + 2
+    else:
+        param_row = ai_summary_end + 2
+    cap_cell = f"C{param_row + 1}"
+    factor_cell = f"C{param_row + 2}"
+
+    ws.cell(row=param_row, column=1,
+            value="DSM SLAB PARAMETERS (the penalty column references these cells)"
+            ).font = f_section
+
+    ws.cell(row=param_row + 1, column=1, value="Installed capacity (MW)").font = f_label
+    c = ws.cell(row=param_row + 1, column=3, value=CAPACITY_MW)
+    c.font = f_input
+
+    ws.cell(row=param_row + 2, column=1, value="Block energy factor (0.25 h x 1000 kW/MW)"
+            ).font = f_label
+    c = ws.cell(row=param_row + 2, column=3, value=BLOCK_ENERGY_FACTOR)
+    c.font = f_input
+
+    slab_head_row = param_row + 4
+    for i, h in enumerate(["Slab", "From %", "To %", "Rate (Rs/kWh)", "Upper edge (MW)"], start=1):
+        cell = ws.cell(row=slab_head_row, column=i, value=h)
+        cell.font = f_head
+        cell.fill = fill_head
+        cell.alignment = center
+
+    slab_rows = {}
+    for i, (label, frm, to, rate) in enumerate(SLABS, start=1):
+        r = slab_head_row + i
+        slab_rows[label] = r
+        ws.cell(row=r, column=1, value=label)
+        ws.cell(row=r, column=2, value=frm)
+        ws.cell(row=r, column=3, value=to if to is not None else "above")
+        rate_cell = ws.cell(row=r, column=4, value=rate)
+        rate_cell.font = f_input
+        if to is not None:
+            edge_cell = ws.cell(row=r, column=5, value=f"={cap_cell}*{to}/100")
+            edge_cell.number_format = "0.000"
+
+    slab1_edge = f"E{slab_rows['Slab 1']}"
+    slab2_edge = f"E{slab_rows['Slab 2']}"
+    slab3_edge = f"E{slab_rows['Slab 3']}"
+    slab2_rate = f"D{slab_rows['Slab 2']}"
+    slab3_rate = f"D{slab_rows['Slab 3']}"
+    slab4_rate = f"D{slab_rows['Slab 4']}"
+
+    def penalty_formula(dev_col, r):
+        return (
+            f"={factor_cell}*("
+            f"MAX(0,MIN(ABS({dev_col}{r}),{slab2_edge})-{slab1_edge})*{slab2_rate}"
+            f"+MAX(0,MIN(ABS({dev_col}{r}),{slab3_edge})-{slab2_edge})*{slab3_rate}"
+            f"+MAX(0,ABS({dev_col}{r})-{slab3_edge})*{slab4_rate})"
+        )
+
+    # Backfill the deviation-% and penalty formulas now that the slab
+    # parameter cells have fixed addresses.
+    for r in scored_rows:
+        pct_cell = ws.cell(row=r, column=6, value=f"=E{r}/{cap_cell}*100")
+        pct_cell.number_format = "\\+0.00;\\-0.00"
+        pen_cell = ws.cell(row=r, column=7, value=penalty_formula("E", r))
+        pen_cell.number_format = "0.00"
+
+    for r in enercast_rows:
+        pct_cell = ws.cell(row=r, column=11, value=f"=J{r}/{cap_cell}*100")
+        pct_cell.number_format = "\\+0.00;\\-0.00"
+        pen_cell = ws.cell(row=r, column=12, value=penalty_formula("J", r))
+        pen_cell.number_format = "0.00"
+
+    # ---------------- day summary ----------------
+    srow = last_row + 2
+    ws.cell(row=srow, column=1, value="DAY SUMMARY - ACCURACY AND DSM PENALTY").font = f_section
+
+    d_rng = f"D{start}:D{last_row}"
+    c_rng = f"C{start}:C{last_row}"
+    e_rng = f"E{start}:E{last_row}"
+    g_rng = f"G{start}:G{last_row}"
+
+    summary = [
+        ("Blocks with a real meter reading", f"=COUNT({d_rng})", "0"),
+        ("Total scheduled (MW, scored blocks)", f'=SUMIF({d_rng},"<>",{c_rng})', "0.000"),
+        ("Total actual (MW)", f"=SUM({d_rng})", "0.000"),
+        ("Total deviation - actual minus scheduled (MW)", f"=SUM({e_rng})", "\\+0.000;\\-0.000"),
+        ("Mean absolute deviation (MW)",
+         f"=SUMPRODUCT(ABS({e_rng}))/COUNT({e_rng})", "0.000"),
+        ("Max absolute deviation (MW)", f"=MAX(MAX({e_rng}),-MIN({e_rng}))", "0.000"),
+        ("Blocks over 0.5 MW deviation (RED)",
+         f'=SUMPRODUCT((ABS({e_rng})>0.5)*({d_rng}<>""))', "0"),
+        ("Blocks within 0.5 MW deviation (BLUE)",
+         f'=SUMPRODUCT((ABS({e_rng})<=0.5)*({d_rng}<>""))', "0"),
+        ("Mean absolute deviation (% of capacity)",
+         f"=SUMPRODUCT(ABS({e_rng}))/COUNT({e_rng})/{cap_cell}*100", "0.00"),
+        ("Blocks that incurred a penalty", f'=COUNTIF({g_rng},">0")', "0"),
+        ("Worst single-block penalty (Rs)", f"=MAX({g_rng})", "0.00"),
+        ("TOTAL DSM PENALTY FOR THE DAY (Rs)", f"=SUM({g_rng})", "0.00"),
+    ]
+
+    for j, (label, formula, fmt) in enumerate(summary, start=1):
+        r = srow + j
+        ws.cell(row=r, column=1, value=label).font = f_label
+        cell = ws.cell(row=r, column=3, value=formula)
+        cell.number_format = fmt
+        if "TOTAL DSM PENALTY" in label:
+            ws.cell(row=r, column=1).font = Font(name=FONT, size=10, bold=True, color=RED)
+            cell.font = Font(name=FONT, size=10, bold=True, color=RED)
+            cell.fill = PatternFill("solid", fgColor=RED_FILL)
+
+    # ---------------- Enercast day summary - reference only ----------------
+    if has_enercast:
+        ec_srow = srow + len(summary) + 2
+        ws.cell(row=ec_srow, column=1,
+                value="ENERCAST SUMMARY - ACCURACY AND DSM PENALTY (reference only)"
+                ).font = f_section
+
+        i_rng = f"I{start}:I{last_row}"
+        j_rng = f"J{start}:J{last_row}"
+        l_rng = f"L{start}:L{last_row}"
+
+        ec_summary = [
+            ("Blocks with Enercast + a real meter reading",
+             f'=SUMPRODUCT(({j_rng}<>"")*1)', "0"),
+            ("Total Enercast (MW, scored blocks)",
+             f'=SUMIF({j_rng},"<>",{i_rng})', "0.000"),
+            ("Total actual (MW, scored blocks)",
+             f'=SUMIF({j_rng},"<>",{d_rng})', "0.000"),
+            ("Total deviation - actual minus Enercast (MW)", f"=SUM({j_rng})",
+             "\\+0.000;\\-0.000"),
+            ("Mean absolute deviation (MW)",
+             f"=SUMPRODUCT(ABS({j_rng}))/COUNT({j_rng})", "0.000"),
+            ("Max absolute deviation (MW)", f"=MAX(MAX({j_rng}),-MIN({j_rng}))", "0.000"),
+            ("Blocks over 0.5 MW deviation (RED)",
+             f'=SUMPRODUCT((ABS({j_rng})>0.5)*({j_rng}<>""))', "0"),
+            ("Blocks within 0.5 MW deviation (BLUE)",
+             f'=SUMPRODUCT((ABS({j_rng})<=0.5)*({j_rng}<>""))', "0"),
+            ("Mean absolute deviation (% of capacity)",
+             f"=SUMPRODUCT(ABS({j_rng}))/COUNT({j_rng})/{cap_cell}*100", "0.00"),
+            ("Blocks that incurred a penalty", f'=COUNTIF({l_rng},">0")', "0"),
+            ("Worst single-block penalty (Rs)", f"=MAX({l_rng})", "0.00"),
+            ("TOTAL DSM PENALTY FOR THE DAY (Rs)", f"=SUM({l_rng})", "0.00"),
+        ]
+
+        for j, (label, formula, fmt) in enumerate(ec_summary, start=1):
+            r = ec_srow + j
+            ws.cell(row=r, column=1, value=label).font = f_label
+            cell = ws.cell(row=r, column=3, value=formula)
+            cell.number_format = fmt
+            if "TOTAL DSM PENALTY" in label:
+                ws.cell(row=r, column=1).font = Font(name=FONT, size=10, bold=True, color=RED)
+                cell.font = Font(name=FONT, size=10, bold=True, color=RED)
+                cell.fill = PatternFill("solid", fgColor=RED_FILL)
+
+    # ---------------- conditional formatting: RED/BLUE deviation band ----------------
+    ws.conditional_formatting.add(
+        f"E{start}:F{last_row}",
+        FormulaRule(formula=[f"AND(ISNUMBER($E{start}),ABS($E{start})>0.5)"],
+                    font=Font(name=FONT, size=10, bold=True, color=RED),
+                    fill=PatternFill("solid", fgColor=RED_FILL), stopIfTrue=True)
+    )
+    ws.conditional_formatting.add(
+        f"E{start}:F{last_row}",
+        FormulaRule(formula=[f"AND(ISNUMBER($E{start}),ABS($E{start})<=0.5)"],
+                    font=Font(name=FONT, size=10, bold=True, color=BLUE),
+                    fill=PatternFill("solid", fgColor=BLUE_FILL), stopIfTrue=True)
+    )
+    ws.conditional_formatting.add(
+        f"G{start}:G{last_row}",
+        FormulaRule(formula=[f"AND(ISNUMBER($G{start}),$G{start}>0)"],
+                    font=Font(name=FONT, size=10, bold=True, color=RED),
+                    fill=PatternFill("solid", fgColor=RED_FILL), stopIfTrue=True)
+    )
+
+    if has_enercast:
+        ws.conditional_formatting.add(
+            f"J{start}:K{last_row}",
+            FormulaRule(formula=[f"AND(ISNUMBER($J{start}),ABS($J{start})>0.5)"],
+                        font=Font(name=FONT, size=10, bold=True, color=RED),
+                        fill=PatternFill("solid", fgColor=RED_FILL), stopIfTrue=True)
+        )
+        ws.conditional_formatting.add(
+            f"J{start}:K{last_row}",
+            FormulaRule(formula=[f"AND(ISNUMBER($J{start}),ABS($J{start})<=0.5)"],
+                        font=Font(name=FONT, size=10, bold=True, color=BLUE),
+                        fill=PatternFill("solid", fgColor=BLUE_FILL), stopIfTrue=True)
+        )
+        ws.conditional_formatting.add(
+            f"L{start}:L{last_row}",
+            FormulaRule(formula=[f"AND(ISNUMBER($L{start}),$L{start}>0)"],
+                        font=Font(name=FONT, size=10, bold=True, color=RED),
+                        fill=PatternFill("solid", fgColor=RED_FILL), stopIfTrue=True)
+        )
+
+    # ---------------- charts ----------------
+    chart_col = get_column_letter(len(headers) + 2)
+
+    line = LineChart()
+    line.title = f"AI Schedule vs Actual Power - {day}"
+    line.height, line.width = 9, 24
+    line.y_axis.title = "MW"
+    line.x_axis.title = "Time"
+
+    data = Reference(ws, min_col=3, max_col=4, min_row=HEAD, max_row=last_row)
+    cats = Reference(ws, min_col=2, min_row=start, max_row=last_row)
+    line.add_data(data, titles_from_data=True)
+    line.set_categories(cats)
+
+    colours = ["1F4E9C", "C00000"]
+    if has_enercast:
+        ec_data = Reference(ws, min_col=9, max_col=9, min_row=HEAD, max_row=last_row)
+        line.add_data(ec_data, titles_from_data=True)
+        colours.append("2E7D32")
+
+    for series, colour in zip(line.series, colours):
+        series.smooth = False
+        series.graphicalProperties.line.solidFill = colour
+        series.graphicalProperties.line.width = 22000
+        series.marker.symbol = "none"
+    ws.add_chart(line, f"{chart_col}3")
+
+    bar = BarChart()
+    bar.title = f"DSM Penalty per Block (Rs) - {day}"
+    bar.height, bar.width = 8, 24
+    bar.y_axis.title = "Rs"
+    bar.x_axis.title = "Time"
+    pen_data = Reference(ws, min_col=7, max_col=7, min_row=HEAD, max_row=last_row)
+    bar.add_data(pen_data, titles_from_data=True)
+    if has_enercast:
+        ec_pen_data = Reference(ws, min_col=12, max_col=12, min_row=HEAD, max_row=last_row)
+        bar.add_data(ec_pen_data, titles_from_data=True)
+    bar.set_categories(cats)
+    ws.add_chart(bar, f"{chart_col}26")
+
+    ws.column_dimensions["A"].width = 8
+    ws.column_dimensions["B"].width = 15
+    ws.column_dimensions["C"].width = 17
+    ws.column_dimensions["D"].width = 14
+    ws.column_dimensions["E"].width = 15
+    ws.column_dimensions["F"].width = 20
+    ws.column_dimensions["G"].width = 13
+    ws.column_dimensions["H"].width = 13
+    if has_enercast:
+        ws.column_dimensions["I"].width = 15
+        ws.column_dimensions["J"].width = 17
+        ws.column_dimensions["K"].width = 22
+        ws.column_dimensions["L"].width = 15
+    ws.freeze_panes = ws.cell(row=start, column=1)
+
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    xlsx_path = OUT_DIR / f"Schedule_vs_Meter_Penalty_{DAY}.xlsx"
+    target = xlsx_path
+    for attempt in range(1, 20):
+        try:
+            wb.save(target)
+            break
+        except PermissionError:
+            target = xlsx_path.with_name(f"{xlsx_path.stem}_{attempt}{xlsx_path.suffix}")
+
+    print(f"rows: {len(rows)}   scored blocks: {int(rows['active_power_kw'].notna().sum())}")
+    print(f"saved: {target}")
+    print(f"NOTE: run recalc.py on this file - it is formula-driven and has no cached values yet.")
+
+
+if __name__ == "__main__":
+    main()

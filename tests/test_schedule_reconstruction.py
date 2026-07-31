@@ -104,26 +104,33 @@ def find_video_for(day, run_time_str):
     hour, minute = map(int, run_time_str.split(":"))
     target = pd.Timestamp(day) + pd.Timedelta(hours=hour, minutes=minute)
 
+    tolerance = settings["vision"].get("video_match_tolerance_minutes", 5) * 60
+
     best = None
 
+    # Hand-recorded clips can live in subfolders (one per day), so search
+    # recursively - a flat glob missed the 2026-07-30 set entirely.
     for pattern in ("*.webm", "*.mp4"):
-        for path in VIDEO_DIR.glob(pattern):
+        for path in list(VIDEO_DIR.glob(pattern)) + list(VIDEO_DIR.rglob(pattern)):
             captured = VisionModule.parse_video_time(path.name)
             if captured is None or captured.date() != day:
                 continue
             gap = abs((pd.Timestamp(captured) - target).total_seconds())
-            if gap <= 300 and (best is None or gap < best[0]):   # within 5 min
+            if gap <= tolerance and (best is None or gap < best[0]):
                 best = (gap, path)
 
     if best is not None:
         return best[1]
+
+    if not settings["vision"].get("use_s3_video_fallback", True):
+        return None
 
     # Nothing local for this slot - fall back to the bucket.
     for captured, key in s3_video_index().items():
         if captured.date() != day:
             continue
         gap = abs((pd.Timestamp(captured) - target).total_seconds())
-        if gap <= 300 and (best is None or gap < best[0]):
+        if gap <= tolerance and (best is None or gap < best[0]):
             best = (gap, key)
 
     if best is None:
