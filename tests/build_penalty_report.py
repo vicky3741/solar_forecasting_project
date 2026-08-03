@@ -111,13 +111,19 @@ def build_rows(day):
     if enercast_day is not None:
         merged = merged.merge(enercast_day, on="timestamp", how="left")
 
-    # Trim to the span that actually has something to show.
-    has_data = merged["active_power_kw"].notna() | merged["scheduled_mw"].notna()
-    merged = merged[has_data.cummax() & has_data[::-1].cummax()[::-1]].reset_index(drop=True)
-
-    # Pre-dawn blocks before the first scheduling run: no forecast has
-    # been made yet, and pre-sunrise output is genuinely ~0.
-    merged["scheduled_mw"] = merged["scheduled_mw"].fillna(0.0)
+    # ONLY the blocks a scheduling run actually wrote. Blocks the meter
+    # covers but no run ever reached (the first run is 06:45, so nothing
+    # before 07:00) were never scheduled by us, so scoring them is
+    # meaningless - and being near-zero all night they silently DILUTE the
+    # day's deviation. The 2026-08-02 meter file starts at 00:00 rather
+    # than ~05:45 like earlier days, and those 30 extra sleeping blocks
+    # pulled the reported deviation from 6.00% down to 3.73% purely by
+    # averaging in rows where nothing happened.
+    #
+    # This is the same rule build_simple_schedule.py already applies, and
+    # it keeps this report's numbers identical to the canonical summary
+    # generate_schedule_for_day writes.
+    merged = merged[merged["scheduled_mw"].notna()].reset_index(drop=True)
 
     return merged
 
@@ -425,37 +431,78 @@ def main():
     line.title = f"AI Schedule vs Actual Power - {day}"
     line.height, line.width = 9, 24
     line.y_axis.title = "MW"
-    line.x_axis.title = "Time"
+    # No x-axis title: the category labels are plainly times, and an axis
+    # title collides with the bottom legend in Excel's rendering.
+    line.x_axis.title = None
 
     data = Reference(ws, min_col=3, max_col=4, min_row=HEAD, max_row=last_row)
     cats = Reference(ws, min_col=2, min_row=start, max_row=last_row)
     line.add_data(data, titles_from_data=True)
     line.set_categories(cats)
+    line.legend.position = "r"
 
-    colours = ["1F4E9C", "C00000"]
+    # Actual is the reference line, so it stays the heaviest; the two
+    # forecasts are thinner and Enercast is dashed, so the three stay
+    # readable even where they overlap.
+    styling = [
+        ("1F4E9C", 20000, None),        # AI schedule
+        ("C00000", 26000, None),        # actual meter
+        ("2E7D32", 20000, "dash"),      # Enercast
+    ]
+
     if has_enercast:
         ec_data = Reference(ws, min_col=9, max_col=9, min_row=HEAD, max_row=last_row)
         line.add_data(ec_data, titles_from_data=True)
-        colours.append("2E7D32")
 
-    for series, colour in zip(line.series, colours):
+    for series, (colour, width, dash) in zip(line.series, styling):
         series.smooth = False
         series.graphicalProperties.line.solidFill = colour
-        series.graphicalProperties.line.width = 22000
+        series.graphicalProperties.line.width = width
+        if dash:
+            series.graphicalProperties.line.dashStyle = dash
         series.marker.symbol = "none"
+
+    # openpyxl defaults BOTH axes to delete=True, which means "hide this
+    # axis" - so the time labels can vanish entirely. Set explicitly.
+    # Do NOT set tickLblSkip here: Excel already thins crowded category
+    # labels sensibly on its own, and forcing a skip dropped the time
+    # axis on the 2026-07-28/29 rebuild.
+    line.x_axis.delete = False
+    line.y_axis.delete = False
+
     ws.add_chart(line, f"{chart_col}3")
 
     bar = BarChart()
+    bar.type = "col"
     bar.title = f"DSM Penalty per Block (Rs) - {day}"
     bar.height, bar.width = 8, 24
     bar.y_axis.title = "Rs"
-    bar.x_axis.title = "Time"
+    bar.x_axis.title = None
+
     pen_data = Reference(ws, min_col=7, max_col=7, min_row=HEAD, max_row=last_row)
     bar.add_data(pen_data, titles_from_data=True)
+
     if has_enercast:
         ec_pen_data = Reference(ws, min_col=12, max_col=12, min_row=HEAD, max_row=last_row)
         bar.add_data(ec_pen_data, titles_from_data=True)
+
     bar.set_categories(cats)
+    bar.legend.position = "r"
+
+    # Two clustered series across ~53 blocks is 106 bars. Excel's default
+    # gap (150%) leaves them hairline-thin and unreadable, so the gap is
+    # closed right down and the pair overlapped slightly - each block then
+    # reads as one two-tone column rather than a picket fence.
+    bar.gapWidth = 30
+    bar.overlap = -10
+
+    for series, colour in zip(bar.series, ("1F4E9C", "2E7D32")):
+        series.graphicalProperties.solidFill = colour
+        series.graphicalProperties.line.solidFill = colour
+
+    bar.x_axis.delete = False
+    bar.y_axis.delete = False
+
     ws.add_chart(bar, f"{chart_col}26")
 
     ws.column_dimensions["A"].width = 8
