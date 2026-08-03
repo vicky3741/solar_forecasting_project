@@ -12,7 +12,7 @@ with the new prompt.
 =========================================================
 """
 
-PROMPT_VERSION = 2
+PROMPT_VERSION = 3
 
 
 class PromptBuilder:
@@ -85,7 +85,11 @@ Report the following, always relative to the CENTER of the map where the plant i
 8. Expected irradiance trend at the center over the NEXT 2 HOURS: one of "increasing", "decreasing", "stable".
 9. Expected irradiance trend at the center 2 TO 4 HOURS from now: one of "increasing", "decreasing", "stable".
 10. Rain probability near the center, as a percentage (0-100).
-11. Your confidence in this analysis, from 0.0 to 1.0.
+11. Cloud field structure near the center: one of "solid" (uniform overcast/uniform clear, generation should be
+    steady), "patchy" (scattered clouds with gaps - generation will swing block to block as gaps and clouds
+    alternate over the plant), "broken" (large distinct cloud masses with clear gaps between them - occasional
+    sharp drops as each mass crosses, otherwise clear).
+12. Your confidence in this analysis, from 0.0 to 1.0.
 
 Return ONLY valid JSON.
 
@@ -106,6 +110,7 @@ JSON format:
     "trend_next_2h": "",
     "trend_2h_to_4h": "",
     "rain_probability_pct": 0,
+    "cloud_field_structure": "",
     "confidence": 0.0
 }
 """
