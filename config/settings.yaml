@@ -267,14 +267,15 @@ outputs:
 storage:
   enabled: true
   provider: s3
-  bucket: windy-video-storage-team03-813676682978-ap-south-1-an
+  # OUR OWN bucket (2026-08-03) - replaces Team 3's shared bucket so this
+  # team is no longer dependent on another team's AWS account/credentials.
+  # Same layout convention kept (inputs/.../videos/.../outputs/...) so no
+  # capture/orchestrator code needed to change, only this destination.
+  bucket: sirmour-team2-storage
   region: ap-south-1
-  # Team 3's data-lake layout: inputs/<state>/<site>/<date>/<DataType>/
   site_prefix: inputs/MadhyaPradesh/SIRMOUR
-  # Windy cloud videos (same bucket, viewable via Team 3's site at 13.206.205.164)
   video_prefix: videos/MadhyaPradesh/SIRMOUR
   video_cache: data/windy/s3_cache
-  # Where this team writes its own forecast outputs back to the bucket
   output_prefix: outputs/team2/SIRMOUR
   auto_pull: true    # orchestrator pulls the latest meter data + same-day Windy video from S3 before forecasting
   auto_push: true    # orchestrator pushes the forecast + current schedule back to S3 after
