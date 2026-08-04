@@ -1,38 +1,43 @@
-﻿<mxfile host="app.diagrams.net" version="24.0.0">
+<mxfile host="app.diagrams.net" version="24.0.0">
   <diagram name="Detailed Architecture" id="archDetailed">
-    <mxGraphModel dx="1400" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1700" pageHeight="2000" math="0" shadow="0">
+    <mxGraphModel dx="1400" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1700" pageHeight="2650" math="0" shadow="0">
       <root>
         <mxCell id="0" />
         <mxCell id="1" parent="0" />
         <!-- Title -->
-        <mxCell id="title" value="Solar Forecasting Pipeline - Detailed Architecture" style="text;html=1;align=left;verticalAlign=middle;fontSize=22;fontStyle=1;fontColor=#1B4332;" vertex="1" parent="1">
-          <mxGeometry x="140" y="20" width="900" height="36" as="geometry" />
+        <mxCell id="title" value="Solar Forecasting Pipeline - Detailed Architecture (2026-08-04)" style="text;html=1;align=left;verticalAlign=middle;fontSize=22;fontStyle=1;fontColor=#1B4332;" vertex="1" parent="1">
+          <mxGeometry x="140" y="20" width="1000" height="36" as="geometry" />
         </mxCell>
-        <mxCell id="caption" value="Team 2 - Sirmour Solar Plant, 5.1 MW - gemini-3.5-flash - amazon/chronos-bolt-small - pvlib Ineichen - ECMWF via Open-Meteo" style="text;html=1;align=left;verticalAlign=middle;fontSize=12;fontColor=#495057;fontStyle=2;" vertex="1" parent="1">
-          <mxGeometry x="140" y="56" width="1100" height="24" as="geometry" />
+        <mxCell id="caption" value="Team 2 - Sirmour Solar Plant, 5.1 MW - gemini-3.5-flash (fallback gemini-3-flash-preview) - amazon/chronos-bolt-small - pvlib Ineichen - ECMWF via Open-Meteo - own S3 bucket" style="text;html=1;align=left;verticalAlign=middle;fontSize=12;fontColor=#495057;fontStyle=2;" vertex="1" parent="1">
+          <mxGeometry x="140" y="56" width="1300" height="24" as="geometry" />
         </mxCell>
-        <mxCell id="legend" value="&lt;div style=&quot;font-size:11px;color:#212529&quot;&gt;&lt;b&gt;Legend&lt;/b&gt;&lt;br&gt;Solid green = live in production&lt;br&gt;Dashed grey = built, currently OFF / unused in the forecast&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E9ECEF;strokeColor=#495057;strokeWidth=1.5;fontColor=#212529;align=left;verticalAlign=top;spacing=8;arcSize=8;" vertex="1" parent="1">
-          <mxGeometry x="1220" y="20" width="340" height="60" as="geometry" />
+        <mxCell id="legend" value="&lt;div style=&quot;font-size:11px;color:#212529&quot;&gt;&lt;b&gt;Legend&lt;/b&gt;&lt;br&gt;Solid green = live in production&lt;br&gt;Dashed grey = built, currently OFF / unused in the forecast&lt;br&gt;Blue = infrastructure (storage/automation)&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E9ECEF;strokeColor=#495057;strokeWidth=1.5;fontColor=#212529;align=left;verticalAlign=top;spacing=8;arcSize=8;" vertex="1" parent="1">
+          <mxGeometry x="1460" y="20" width="200" height="70" as="geometry" />
+        </mxCell>
+
+        <!-- N0 EC2 Automation -->
+        <mxCell id="n0" value="&lt;div style=&quot;font-size:14px&quot;&gt;&lt;b&gt;0. Automation - EC2 (systemd)&lt;/b&gt;&lt;/div&gt;&lt;div style=&quot;font-size:11px;font-style:italic;margin-top:2px&quot;&gt;solar-forecast.service - Ubuntu, us-east-1&lt;/div&gt;&lt;div style=&quot;font-size:12px;margin-top:8px&quot;&gt;- modules/scheduler/scheduler.py - fires at 06:45, 08:15, 09:45, 11:15, 12:45, 14:15, 15:45 IST&lt;br&gt;- Capture runs as its own short-lived subprocess (Chromium OOM isolation)&lt;br&gt;- Orchestrator built fresh per run - Chronos/torch (~450 MB) never held resident&lt;br&gt;- Single-instance lock via bound localhost port&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#1B4A5E;strokeColor=#2E86AB;fontColor=#FFFFFF;align=left;verticalAlign=top;spacing=10;arcSize=6;" vertex="1" parent="1">
+          <mxGeometry x="140" y="100" width="480" height="190" as="geometry" />
         </mxCell>
 
         <!-- N1 Capture -->
-        <mxCell id="n1" value="&lt;div style=&quot;font-size:14px&quot;&gt;&lt;b&gt;1. Windy Satellite Capture&lt;/b&gt;&lt;/div&gt;&lt;div style=&quot;font-size:11px;font-style:italic;margin-top:2px&quot;&gt;Playwright + Chromium (headless)&lt;/div&gt;&lt;div style=&quot;font-size:12px;margin-top:8px&quot;&gt;- Viewport 1280x720, zoom level 8&lt;br&gt;- Overlay: Satellite (VIS layer)&lt;br&gt;- 20-second animation clip recorded&lt;br&gt;- + solarpower &amp;amp; clouds still screenshots&lt;br&gt;- Fixed pixel-coordinate clicks for VIS/play buttons&lt;br&gt;- Uploaded to S3 (team bucket) after recording&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#1B4332;strokeColor=#40916C;fontColor=#FFFFFF;align=left;verticalAlign=top;spacing=10;arcSize=6;" vertex="1" parent="1">
-          <mxGeometry x="680" y="100" width="480" height="190" as="geometry" />
+        <mxCell id="n1" value="&lt;div style=&quot;font-size:14px&quot;&gt;&lt;b&gt;1. Windy Satellite Capture&lt;/b&gt;&lt;/div&gt;&lt;div style=&quot;font-size:11px;font-style:italic;margin-top:2px&quot;&gt;Playwright + Chromium (headless)&lt;/div&gt;&lt;div style=&quot;font-size:12px;margin-top:8px&quot;&gt;- Viewport 1280x720, zoom level 8&lt;br&gt;- Overlay: Satellite (VIS layer)&lt;br&gt;- 20-second animation clip recorded&lt;br&gt;- + solarpower &amp;amp; clouds still screenshots&lt;br&gt;- Fixed pixel-coordinate clicks for VIS/play buttons&lt;br&gt;- Re-encoded to H.264 (~56MB -&gt; a few MB)&lt;/div&gt;&lt;div style=&quot;font-size:11px;font-weight:bold;margin-top:8px;color:#FFD166&quot;&gt;DATA: LOCAL disk first (data/windy/videos/) then UPLOADED to S3 (videos/MadhyaPradesh/SIRMOUR/&amp;lt;date&amp;gt;/) - both copies exist&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#1B4332;strokeColor=#40916C;fontColor=#FFFFFF;align=left;verticalAlign=top;spacing=10;arcSize=6;" vertex="1" parent="1">
+          <mxGeometry x="680" y="100" width="480" height="210" as="geometry" />
         </mxCell>
 
         <!-- N2 Frame extraction -->
-        <mxCell id="n2" value="&lt;div style=&quot;font-size:14px&quot;&gt;&lt;b&gt;2. Frame Extraction - OpenCV&lt;/b&gt;&lt;/div&gt;&lt;div style=&quot;font-size:12px;margin-top:8px&quot;&gt;- 10 frames, uniform sampling across the clip&lt;br&gt;- Saved in full colour (BGR) - NOT grayscale&lt;br&gt;- Skips the map-loading start &amp;amp; timeline loop-back&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#1B4332;strokeColor=#40916C;fontColor=#FFFFFF;align=left;verticalAlign=top;spacing=10;arcSize=6;" vertex="1" parent="1">
-          <mxGeometry x="680" y="330" width="480" height="150" as="geometry" />
+        <mxCell id="n2" value="&lt;div style=&quot;font-size:14px&quot;&gt;&lt;b&gt;2. Frame Extraction - OpenCV&lt;/b&gt;&lt;/div&gt;&lt;div style=&quot;font-size:12px;margin-top:8px&quot;&gt;- 10 frames, uniform sampling across the clip&lt;br&gt;- Saved in full colour (BGR) - NOT grayscale&lt;br&gt;- Skips the map-loading start &amp;amp; timeline loop-back&lt;/div&gt;&lt;div style=&quot;font-size:11px;font-weight:bold;margin-top:8px;color:#FFD166&quot;&gt;DATA: LOCAL disk ONLY (outputs/extracted_frames/&amp;lt;video&amp;gt;/frame_*.png) - never uploaded to S3&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#1B4332;strokeColor=#40916C;fontColor=#FFFFFF;align=left;verticalAlign=top;spacing=10;arcSize=6;" vertex="1" parent="1">
+          <mxGeometry x="680" y="340" width="480" height="170" as="geometry" />
         </mxCell>
 
         <!-- N3 Vision LLM -->
-        <mxCell id="n3" value="&lt;div style=&quot;font-size:14px&quot;&gt;&lt;b&gt;3. Vision LLM&lt;/b&gt;&lt;/div&gt;&lt;div style=&quot;font-size:11px;font-style:italic;margin-top:2px&quot;&gt;Provider: Google Gemini - model gemini-3.5-flash&lt;/div&gt;&lt;div style=&quot;font-size:12px;margin-top:8px&quot;&gt;- Free tier · config-swappable (make_vision_client)&lt;br&gt;- Alt provider: GPT-4o (OpenAI) / OpenRouter free vision models&lt;br&gt;- temperature 0.2 · max_output_tokens 8192&lt;br&gt;- Retry: 3 attempts, exponential backoff (5s, 10s) on HTTP 503&lt;br&gt;- Reads all 10 frames together, chronologically&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#1B4332;strokeColor=#40916C;fontColor=#FFFFFF;align=left;verticalAlign=top;spacing=10;arcSize=6;" vertex="1" parent="1">
-          <mxGeometry x="680" y="510" width="480" height="170" as="geometry" />
+        <mxCell id="n3" value="&lt;div style=&quot;font-size:14px&quot;&gt;&lt;b&gt;3. Vision LLM&lt;/b&gt;&lt;/div&gt;&lt;div style=&quot;font-size:11px;font-style:italic;margin-top:2px&quot;&gt;Primary: gemini-3.5-flash - free tier, 20 req/day (shared)&lt;/div&gt;&lt;div style=&quot;font-size:12px;margin-top:8px&quot;&gt;- Auto-fallback to gemini-3-flash-preview when the daily quota is spent - never silently drops to no-vision anymore&lt;br&gt;- Alt provider: GPT-4o (OpenAI) - config-swappable&lt;br&gt;- temperature 0.2 - max_output_tokens 8192&lt;br&gt;- Retry: 3 attempts, exponential backoff (5s, 10s) on HTTP 503&lt;br&gt;- Reads all 10 frames together, chronologically&lt;br&gt;- Results cached to disk per video (never re-billed on re-run)&lt;/div&gt;&lt;div style=&quot;font-size:11px;font-weight:bold;margin-top:8px;color:#FFD166&quot;&gt;DATA: API call only, nothing stored here - the reply becomes N4&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#1B4332;strokeColor=#40916C;fontColor=#FFFFFF;align=left;verticalAlign=top;spacing=10;arcSize=6;" vertex="1" parent="1">
+          <mxGeometry x="680" y="530" width="480" height="210" as="geometry" />
         </mxCell>
 
         <!-- N4 Features JSON -->
-        <mxCell id="n4" value="&lt;div style=&quot;font-size:14px&quot;&gt;&lt;b&gt;4. Weather Features (JSON)&lt;/b&gt;&lt;/div&gt;&lt;div style=&quot;font-size:12px;margin-top:8px&quot;&gt;- cloud_coverage_pct&lt;br&gt;- cloud_density (none / thin / moderate / thick)&lt;br&gt;- cloud_motion_direction + cloud_motion_speed&lt;br&gt;- moving_toward_plant (true/false)&lt;br&gt;- expected_change + minutes_until_change&lt;br&gt;- trend_next_2h / trend_2h_to_4h&lt;br&gt;- rain_probability_pct&lt;br&gt;- confidence (0.0 – 1.0)&lt;/div&gt;&lt;div style=&quot;font-size:11px;font-style:italic;margin-top:8px;color:#B7E4C7&quot;&gt;Only trend_next_2h, trend_2h_to_4h, minutes_until_change and confidence actually reach the forecast - the rest is cached and unused&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#1B4332;strokeColor=#40916C;fontColor=#FFFFFF;align=left;verticalAlign=top;spacing=10;arcSize=6;" vertex="1" parent="1">
-          <mxGeometry x="680" y="710" width="480" height="280" as="geometry" />
+        <mxCell id="n4" value="&lt;div style=&quot;font-size:14px&quot;&gt;&lt;b&gt;4. Weather Features (JSON) - prompt v3&lt;/b&gt;&lt;/div&gt;&lt;div style=&quot;font-size:12px;margin-top:8px&quot;&gt;- cloud_coverage_pct&lt;br&gt;- cloud_density (none / thin / moderate / thick)&lt;br&gt;- cloud_motion_direction + cloud_motion_speed&lt;br&gt;- moving_toward_plant (true/false)&lt;br&gt;- expected_change + minutes_until_change&lt;br&gt;- trend_next_2h / trend_2h_to_4h&lt;br&gt;- rain_probability_pct&lt;br&gt;- &lt;b&gt;cloud_field_structure&lt;/b&gt; (solid / patchy / broken) - NEW, targets the sharp single-block spikes patchy skies cause&lt;br&gt;- confidence (0.0 - 1.0)&lt;/div&gt;&lt;div style=&quot;font-size:11px;font-style:italic;margin-top:8px;color:#B7E4C7&quot;&gt;trend_next_2h, trend_2h_to_4h, minutes_until_change, confidence feed the forecast today. cloud_field_structure is collected only (not yet wired into the blend) pending ~1 week of data for a leave-one-day-out test.&lt;/div&gt;&lt;div style=&quot;font-size:11px;font-weight:bold;margin-top:8px;color:#FFD166&quot;&gt;DATA: LOCAL disk ONLY - outputs/extracted_frames/&amp;lt;video&amp;gt;/vision_result.json. NEVER uploaded to S3. Runs on EC2 -&gt; JSON stays on the EC2 disk; runs on this PC -&gt; JSON stays here. Two machines never share this cache.&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#1B4332;strokeColor=#40916C;fontColor=#FFFFFF;align=left;verticalAlign=top;spacing=10;arcSize=6;" vertex="1" parent="1">
+          <mxGeometry x="680" y="760" width="480" height="330" as="geometry" />
         </mxCell>
 
         <!-- Optical flow (dashed, unused) -->
@@ -45,34 +50,59 @@
           <mxGeometry x="1220" y="580" width="340" height="200" as="geometry" />
         </mxCell>
 
+        <!-- Module temperature (dashed, rejected) -->
+        <mxCell id="modtemp" value="&lt;div style=&quot;font-size:13px&quot;&gt;&lt;b&gt;Module-Temperature Derate&lt;/b&gt;&lt;/div&gt;&lt;div style=&quot;font-size:11px;font-style:italic;margin-top:2px&quot;&gt;tests/test_module_temperature_experiment.py&lt;/div&gt;&lt;div style=&quot;font-size:11px;margin-top:8px&quot;&gt;- MOD TEMP sensor column exists but is unused by the blend&lt;br&gt;- Oracle test (measured temp, re-tuned PR jointly): +0.000 pts, 0/31 days&lt;/div&gt;&lt;div style=&quot;font-size:11px;font-style:italic;margin-top:8px&quot;&gt;REJECTED - tuned performance_ratio already absorbs the average temperature loss; no orthogonal signal left&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;dashed=1;fillColor=#E9ECEF;strokeColor=#495057;strokeWidth=1.5;fontColor=#212529;align=left;verticalAlign=top;spacing=8;arcSize=8;" vertex="1" parent="1">
+          <mxGeometry x="1220" y="800" width="340" height="180" as="geometry" />
+        </mxCell>
+
         <!-- N5 Meter -->
-        <mxCell id="n5" value="&lt;div style=&quot;font-size:14px&quot;&gt;&lt;b&gt;Previous Meter Generation&lt;/b&gt;&lt;/div&gt;&lt;div style=&quot;font-size:12px;margin-top:8px&quot;&gt;- Historical CSVs (*_SOLAR_INV.csv), 15-min interval&lt;br&gt;- Validate → outlier removal → ffill/bfill → time-align to grid&lt;br&gt;- Pulled fresh from S3 before every run&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#2D6A4F;strokeColor=#40916C;fontColor=#FFFFFF;align=left;verticalAlign=top;spacing=10;arcSize=6;" vertex="1" parent="1">
-          <mxGeometry x="140" y="730" width="440" height="150" as="geometry" />
+        <mxCell id="n5" value="&lt;div style=&quot;font-size:14px&quot;&gt;&lt;b&gt;Previous Meter Generation&lt;/b&gt;&lt;/div&gt;&lt;div style=&quot;font-size:12px;margin-top:8px&quot;&gt;- Historical CSVs (*_SOLAR_INV.csv), 15-min interval&lt;br&gt;- Validate -&gt; outlier removal -&gt; ffill/bfill -&gt; time-align to grid&lt;br&gt;- Pulled fresh from our own S3 bucket before every run&lt;/div&gt;&lt;div style=&quot;font-size:11px;font-weight:bold;margin-top:8px;color:#D8F3DC&quot;&gt;DATA: S3 -&gt; downloaded to LOCAL (data/historical/) -&gt; read from LOCAL&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#2D6A4F;strokeColor=#40916C;fontColor=#FFFFFF;align=left;verticalAlign=top;spacing=10;arcSize=6;" vertex="1" parent="1">
+          <mxGeometry x="140" y="330" width="480" height="170" as="geometry" />
         </mxCell>
 
         <!-- N6 Weather -->
         <mxCell id="n6" value="&lt;div style=&quot;font-size:14px&quot;&gt;&lt;b&gt;Weather Forecast&lt;/b&gt;&lt;/div&gt;&lt;div style=&quot;font-size:12px;margin-top:8px&quot;&gt;- ECMWF IFS 0.25° delivered via Open-Meteo (free, no key)&lt;br&gt;- Signal used: forecast shortwave radiation (GHI) - NOT cloud-cover %, which over-counts thin cirrus&lt;br&gt;- Bias-corrected: scaled by inverse of the median forecast/actual bias over the last 5 finished days&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#2D6A4F;strokeColor=#40916C;fontColor=#FFFFFF;align=left;verticalAlign=top;spacing=10;arcSize=6;" vertex="1" parent="1">
-          <mxGeometry x="140" y="900" width="440" height="170" as="geometry" />
+          <mxGeometry x="140" y="510" width="480" height="170" as="geometry" />
         </mxCell>
 
         <!-- N7 Clearsky -->
-        <mxCell id="n7" value="&lt;div style=&quot;font-size:14px&quot;&gt;&lt;b&gt;Clear-Sky Physics&lt;/b&gt;&lt;/div&gt;&lt;div style=&quot;font-size:12px;margin-top:8px&quot;&gt;- pvlib - Ineichen clear-sky model&lt;br&gt;- Performance ratio: 0.80&lt;br&gt;- tilt = latitude (24.56°) · azimuth = 180° (true south) - assumed, site value not provided&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#2D6A4F;strokeColor=#40916C;fontColor=#FFFFFF;align=left;verticalAlign=top;spacing=10;arcSize=6;" vertex="1" parent="1">
-          <mxGeometry x="140" y="1090" width="440" height="150" as="geometry" />
+        <mxCell id="n7" value="&lt;div style=&quot;font-size:14px&quot;&gt;&lt;b&gt;Clear-Sky Physics&lt;/b&gt;&lt;/div&gt;&lt;div style=&quot;font-size:12px;margin-top:8px&quot;&gt;- pvlib - Ineichen clear-sky model&lt;br&gt;- Performance ratio: 0.80&lt;br&gt;- tilt = latitude (24.56°) - azimuth = 180° (true south) - assumed, site value not provided&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#2D6A4F;strokeColor=#40916C;fontColor=#FFFFFF;align=left;verticalAlign=top;spacing=10;arcSize=6;" vertex="1" parent="1">
+          <mxGeometry x="140" y="700" width="480" height="150" as="geometry" />
         </mxCell>
 
         <!-- N8 Blend -->
-        <mxCell id="n8" value="&lt;div style=&quot;font-size:14px&quot;&gt;&lt;b&gt;5. Weighted Blend + Chronos&lt;/b&gt;&lt;/div&gt;&lt;div style=&quot;font-size:11px;font-style:italic;margin-top:2px&quot;&gt;Numbers → Numbers - no LLM involved&lt;/div&gt;&lt;div style=&quot;font-size:12px;margin-top:8px&quot;&gt;- Chronos: amazon/chronos-bolt-small, CPU, zero-shot&lt;br&gt;- final_kt = 0.65 x weather_kt + 0.35 x base_kt&lt;br&gt;- base_kt = (0.20 x context_ratio) x chronos_kt + persistence&lt;br&gt;- Vision adjusts persistence only - capped ≈ ±4% of the final number&lt;br&gt;- final_kw = final_kt x clear-sky curve (from N7), clipped to 5100 kW&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#1B4332;strokeColor=#40916C;fontColor=#FFFFFF;align=left;verticalAlign=top;spacing=10;arcSize=6;" vertex="1" parent="1">
-          <mxGeometry x="680" y="1280" width="480" height="190" as="geometry" />
+        <mxCell id="n8" value="&lt;div style=&quot;font-size:14px&quot;&gt;&lt;b&gt;5. Weighted Blend + Chronos&lt;/b&gt;&lt;/div&gt;&lt;div style=&quot;font-size:11px;font-style:italic;margin-top:2px&quot;&gt;Numbers -&gt; Numbers - no LLM involved&lt;/div&gt;&lt;div style=&quot;font-size:12px;margin-top:8px&quot;&gt;- Chronos: amazon/chronos-bolt-small, CPU, zero-shot&lt;br&gt;- final_kt = &lt;b&gt;0.25&lt;/b&gt; x weather_kt + 0.75 x base_kt &lt;i&gt;(re-tuned 2026-08-04, was 0.65 - leave-one-day-out found 0.65 costing ~0.8-1.0 pts; confirmed with AND without vision)&lt;/i&gt;&lt;br&gt;- base_kt = (0.20 x context_ratio) x chronos_kt + persistence&lt;br&gt;- Vision adjusts persistence only - capped ~ +/-4% of the final number&lt;br&gt;- final_kw = final_kt x clear-sky curve (from N7), clipped to 5100 kW&lt;/div&gt;&lt;div style=&quot;font-size:11px;font-weight:bold;margin-top:8px;color:#FFD166&quot;&gt;DATA: NOT S3, NOT a service - LOCAL CODE, modules/fusion/fusion.py + modules/forecasting/predictor.py, runs in-process, in-memory. Nothing written to disk here.&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#1B4332;strokeColor=#40916C;fontColor=#FFFFFF;align=left;verticalAlign=top;spacing=10;arcSize=6;" vertex="1" parent="1">
+          <mxGeometry x="680" y="1110" width="480" height="220" as="geometry" />
+        </mxCell>
+
+        <!-- Adaptive weighting (dashed, rejected) -->
+        <mxCell id="adaptive" value="&lt;div style=&quot;font-size:13px&quot;&gt;&lt;b&gt;Adaptive Weather Weight&lt;/b&gt;&lt;/div&gt;&lt;div style=&quot;font-size:11px;font-style:italic;margin-top:2px&quot;&gt;tests/test_adaptive_weather_weight_experiment.py&lt;/div&gt;&lt;div style=&quot;font-size:11px;margin-top:8px&quot;&gt;- Tested: weight ramps by forecast horizon, and by today's recent kt volatility&lt;br&gt;- Best case (horizon): only +0.03 pts vs a re-tuned CONSTANT weight&lt;/div&gt;&lt;div style=&quot;font-size:11px;font-style:italic;margin-top:8px&quot;&gt;REJECTED for now - direction was physically right (near-term trusts the meter, far-term trusts weather) but the gain is below the 0.10 pt bar at 34 days. The re-tuned CONSTANT (0.25, above) captured almost all the available gain on its own. Revisit at ~3 months of data.&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;dashed=1;fillColor=#E9ECEF;strokeColor=#495057;strokeWidth=1.5;fontColor=#212529;align=left;verticalAlign=top;spacing=8;arcSize=8;" vertex="1" parent="1">
+          <mxGeometry x="1220" y="1080" width="340" height="230" as="geometry" />
         </mxCell>
 
         <!-- N9 Case correction -->
-        <mxCell id="n9" value="&lt;div style=&quot;font-size:14px&quot;&gt;&lt;b&gt;6. Case-Based Correction&lt;/b&gt;&lt;/div&gt;&lt;div style=&quot;font-size:12px;margin-top:8px&quot;&gt;- k = 40 nearest analogue blocks (by time-of-day, kt, horizon, forecast level)&lt;br&gt;- Applied at strength 0.5 - full strength (1.0) overfits and hurts&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#1B4332;strokeColor=#40916C;fontColor=#FFFFFF;align=left;verticalAlign=top;spacing=10;arcSize=6;" vertex="1" parent="1">
-          <mxGeometry x="680" y="1510" width="480" height="130" as="geometry" />
+        <mxCell id="n9" value="&lt;div style=&quot;font-size:14px&quot;&gt;&lt;b&gt;6. Case-Based Correction&lt;/b&gt;&lt;/div&gt;&lt;div style=&quot;font-size:12px;margin-top:8px&quot;&gt;- k = 40 nearest analogue blocks (by time-of-day, kt, horizon, forecast level)&lt;br&gt;- Applied at strength 0.5 - full strength (1.0) overfits and hurts&lt;/div&gt;&lt;div style=&quot;font-size:11px;font-weight:bold;margin-top:8px;color:#FFD166&quot;&gt;DATA: LOCAL CODE, reads LOCAL file models/case_store.csv (tracked in git, not S3)&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#1B4332;strokeColor=#40916C;fontColor=#FFFFFF;align=left;verticalAlign=top;spacing=10;arcSize=6;" vertex="1" parent="1">
+          <mxGeometry x="680" y="1360" width="480" height="150" as="geometry" />
         </mxCell>
 
         <!-- N10 Outputs -->
-        <mxCell id="n10" value="&lt;div style=&quot;font-size:14px&quot;&gt;&lt;b&gt;7. Outputs&lt;/b&gt;&lt;/div&gt;&lt;div style=&quot;font-size:12px;margin-top:8px&quot;&gt;- &amp;lt;date&amp;gt;_&amp;lt;time&amp;gt;.csv - this run's 96-block forecast&lt;br&gt;- archive.csv - every run ever, append-only&lt;br&gt;- current_final_schedule.csv - actual (completed blocks) + forecast (blocks ahead)&lt;br&gt;- &amp;lt;date&amp;gt;_end_of_day_validation.json - after the 15:45 run&lt;br&gt;- Pushed to S3 → served by FastAPI dashboard + 3 JSON endpoints&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#1B4332;strokeColor=#40916C;fontColor=#FFFFFF;align=left;verticalAlign=top;spacing=10;arcSize=6;" vertex="1" parent="1">
-          <mxGeometry x="680" y="1680" width="480" height="220" as="geometry" />
+        <mxCell id="n10" value="&lt;div style=&quot;font-size:14px&quot;&gt;&lt;b&gt;7. Outputs&lt;/b&gt;&lt;/div&gt;&lt;div style=&quot;font-size:12px;margin-top:8px&quot;&gt;- &amp;lt;date&amp;gt;_&amp;lt;time&amp;gt;.csv - this run's 96-block forecast&lt;br&gt;- archive.csv - every run ever, append-only&lt;br&gt;- current_final_schedule.csv - actual (completed blocks) + forecast (blocks ahead)&lt;br&gt;- &amp;lt;date&amp;gt;_end_of_day_validation.json - after the 15:45 run&lt;br&gt;- Served locally by FastAPI dashboard + 3 JSON endpoints&lt;/div&gt;&lt;div style=&quot;font-size:11px;font-weight:bold;margin-top:8px;color:#FFD166&quot;&gt;DATA: CREATED LOCAL first (outputs/schedules/current_final_schedule.csv, outputs/forecasts/) then UPLOADED to S3 (outputs/team2/SIRMOUR/...). Both copies exist after every run - local is source, S3 is the shared copy.&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#1B4332;strokeColor=#40916C;fontColor=#FFFFFF;align=left;verticalAlign=top;spacing=10;arcSize=6;" vertex="1" parent="1">
+          <mxGeometry x="680" y="1580" width="480" height="220" as="geometry" />
+        </mxCell>
+
+        <!-- N11 Storage -->
+        <mxCell id="n11" value="&lt;div style=&quot;font-size:14px&quot;&gt;&lt;b&gt;Storage - sirmour-team2-storage (own bucket)&lt;/b&gt;&lt;/div&gt;&lt;div style=&quot;font-size:11px;font-style:italic;margin-top:2px&quot;&gt;modules/storage/s3_client.py - AWS account 491429109178, ap-south-1&lt;/div&gt;&lt;div style=&quot;font-size:12px;margin-top:8px&quot;&gt;- Migrated off Team 3's shared bucket 2026-08-03 - full independence, 559 historical files moved&lt;br&gt;- Layout: inputs/&amp;lt;state&amp;gt;/&amp;lt;site&amp;gt;/&amp;lt;date&amp;gt;/Metered_Data/, videos/.../&amp;lt;date&amp;gt;/, outputs/team2/SIRMOUR/&lt;br&gt;- team2-pipeline IAM user (S3-only) runs the automation&lt;br&gt;- team002 IAM user (S3 read-only, no EC2) given to the mentor for visibility&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#1B4A5E;strokeColor=#2E86AB;fontColor=#FFFFFF;align=left;verticalAlign=top;spacing=10;arcSize=6;" vertex="1" parent="1">
+          <mxGeometry x="140" y="1740" width="1020" height="170" as="geometry" />
+        </mxCell>
+
+        <!-- N12 Evaluation -->
+        <mxCell id="n12" value="&lt;div style=&quot;font-size:14px&quot;&gt;&lt;b&gt;8. Evaluation - DSM Penalty + Enercast&lt;/b&gt;&lt;/div&gt;&lt;div style=&quot;font-size:11px;font-style:italic;margin-top:2px&quot;&gt;tests/build_penalty_report.py, modules/evaluation/evaluator.py&lt;/div&gt;&lt;div style=&quot;font-size:12px;margin-top:8px&quot;&gt;- Scored ONLY against real meter readings, never gap-filled ones&lt;br&gt;- DSM slabs: 0-10% deviation = free, 10-15% = Rs 0.5/kWh, 15-20% = Rs 0.75/kWh, &gt;20% = Rs 1/kWh&lt;br&gt;- Enercast run alongside as a reference comparison ONLY - never a model input, never used to grade us&lt;br&gt;- Per-day reports: blocks within/outside band, total penalty, deviation %, both series charted&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#1B4332;strokeColor=#40916C;fontColor=#FFFFFF;align=left;verticalAlign=top;spacing=10;arcSize=6;" vertex="1" parent="1">
+          <mxGeometry x="140" y="1950" width="1020" height="190" as="geometry" />
+        </mxCell>
+
+        <!-- Edges: EC2 to capture -->
+        <mxCell id="e0" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#2E86AB;strokeWidth=2.5;endArrow=block;endFill=1;" edge="1" parent="1" source="n0" target="n1">
+          <mxGeometry relative="1" as="geometry" />
         </mxCell>
 
         <!-- Edges: main trunk -->
@@ -111,6 +141,20 @@
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
         <mxCell id="e11" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;dashed=1;strokeColor=#495057;strokeWidth=2;endArrow=block;endFill=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="n2" target="pre">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e12" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;dashed=1;strokeColor=#495057;strokeWidth=2;endArrow=block;endFill=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="n5" target="modtemp">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e13" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;dashed=1;strokeColor=#495057;strokeWidth=2;endArrow=block;endFill=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="n8" target="adaptive">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- Edges: outputs to storage, storage to evaluation -->
+        <mxCell id="e14" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#2E86AB;strokeWidth=2.5;endArrow=block;endFill=1;" edge="1" parent="1" source="n10" target="n11">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e15" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#2E86AB;strokeWidth=2.5;endArrow=block;endFill=1;" edge="1" parent="1" source="n11" target="n12">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
 
