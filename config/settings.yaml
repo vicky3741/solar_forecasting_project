@@ -152,7 +152,11 @@ weather:
   # bias correction helped 8/8 monsoon days under ECMWF (6/8 before) - its
   # bias is steadier, so the correction has an easier job. Empty = best_match.
   model: ecmwf_ifs025
-  weather_weight: 0.65     # TUNED + VALIDATED 2026-07-21: sweep found a flat optimum plateau 0.6-0.8 (dev ~7.28-7.31%); 0.65 = stable middle. Baseline (weather off) was 8.56% -> -1.2 pts. Leave-one-day-out: weather helped 11/13 unseen days. Weight 1.0 (weather only) was WORSE (7.54%), confirming the blend beats the raw forecast. Re-tune as more days arrive.
+  # Re-tuned 2026-08-04: leave-one-day-out testing (34 days, confirmed on
+  # 12 vision-covered days) found 0.65 costing ~0.8 pts of accuracy vs an
+  # optimum near 0.20-0.23. See tests/test_weather_weight_retune.py and
+  # tests/test_weather_weight_vision_check.py.
+  weather_weight: 0.25     # TUNED + VALIDATED 2026-07-21: sweep found a flat optimum plateau 0.6-0.8 (dev ~7.28-7.31%); 0.65 = stable middle. Baseline (weather off) was 8.56% -> -1.2 pts. Leave-one-day-out: weather helped 11/13 unseen days. Weight 1.0 (weather only) was WORSE (7.54%), confirming the blend beats the raw forecast. Re-tune as more days arrive.
   cache_dir: data/weather/openmeteo_cache
   timeout_seconds: 25
   # Historical comparisons use the latest archived 6-hourly model run that
