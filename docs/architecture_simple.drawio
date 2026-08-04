@@ -1,0 +1,68 @@
+<mxfile host="app.diagrams.net" version="24.0.0">
+  <diagram name="Simple Architecture" id="archSimple">
+    <mxGraphModel dx="1400" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="900" pageHeight="2100" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <mxCell id="title" value="Solar Forecasting - Simple View" style="text;html=1;align=left;verticalAlign=middle;fontSize=24;fontStyle=1;fontColor=#1B4332;" vertex="1" parent="1">
+          <mxGeometry x="60" y="20" width="700" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="legend" value="&lt;div style=&quot;font-size:13px&quot;&gt;&lt;b&gt;Green box&lt;/b&gt; = kept on our SERVER only&amp;nbsp;&amp;nbsp;&lt;b&gt;Blue box&lt;/b&gt; = also copied to CLOUD STORAGE (shared)&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E9ECEF;strokeColor=#495057;fontColor=#212529;align=left;spacing=8;" vertex="1" parent="1">
+          <mxGeometry x="60" y="66" width="780" height="34" as="geometry" />
+        </mxCell>
+
+        <mxCell id="s0" value="&lt;b&gt;0. Auto-Start&lt;/b&gt;&lt;br&gt;Runs by itself, 7 times a day&lt;br&gt;06:45, 08:15, 09:45, 11:15, 12:45, 14:15, 15:45" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#1B4A5E;strokeColor=#2E86AB;fontColor=#FFFFFF;fontSize=14;spacing=10;" vertex="1" parent="1">
+          <mxGeometry x="60" y="130" width="780" height="80" as="geometry" />
+        </mxCell>
+
+        <mxCell id="s1" value="&lt;b&gt;1. Record Cloud Video&lt;/b&gt;&lt;br&gt;Robot browser opens Windy.com, records 20-sec video of sky over plant" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#1B4A5E;strokeColor=#2E86AB;fontColor=#FFFFFF;fontSize=14;spacing=10;" vertex="1" parent="1">
+          <mxGeometry x="60" y="240" width="780" height="80" as="geometry" />
+        </mxCell>
+
+        <mxCell id="s2" value="&lt;b&gt;2. Pick Best Frames&lt;/b&gt;&lt;br&gt;Picks 10 clear pictures from that video (server only)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#2D6A4F;strokeColor=#40916C;fontColor=#FFFFFF;fontSize=14;spacing=10;" vertex="1" parent="1">
+          <mxGeometry x="60" y="350" width="780" height="70" as="geometry" />
+        </mxCell>
+
+        <mxCell id="s3" value="&lt;b&gt;3. Ask the AI&lt;/b&gt;&lt;br&gt;Shows pictures to Gemini AI, asks: how are clouds moving, when will they reach the plant?" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#2D6A4F;strokeColor=#40916C;fontColor=#FFFFFF;fontSize=14;spacing=10;" vertex="1" parent="1">
+          <mxGeometry x="60" y="450" width="780" height="80" as="geometry" />
+        </mxCell>
+
+        <mxCell id="s4" value="&lt;b&gt;4. AI's Answer&lt;/b&gt;&lt;br&gt;Cloud amount, direction, speed, minutes until it arrives, how sure the AI is. Saved on server only." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#2D6A4F;strokeColor=#40916C;fontColor=#FFFFFF;fontSize=14;spacing=10;" vertex="1" parent="1">
+          <mxGeometry x="60" y="560" width="780" height="80" as="geometry" />
+        </mxCell>
+
+        <mxCell id="s5" value="&lt;b&gt;5. Other Ingredients (fetched from cloud storage)&lt;/b&gt;&lt;br&gt;- Past real power readings (meter)&lt;br&gt;- Free weather forecast, corrected using last 5 days' error&lt;br&gt;- Sun-position physics: exact max power possible right now, no data needed" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#1B4A5E;strokeColor=#2E86AB;fontColor=#FFFFFF;fontSize=14;spacing=10;" vertex="1" parent="1">
+          <mxGeometry x="60" y="670" width="780" height="110" as="geometry" />
+        </mxCell>
+
+        <mxCell id="s6" value="&lt;b&gt;6. Combine Everything (on our server)&lt;/b&gt;&lt;br&gt;AI cloud info + weather forecast + past power + sun physics + trend AI (Chronos)&lt;br&gt;Weather forecast counts 25%, everything else 75%" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#2D6A4F;strokeColor=#40916C;fontColor=#FFFFFF;fontSize=14;spacing=10;" vertex="1" parent="1">
+          <mxGeometry x="60" y="810" width="780" height="90" as="geometry" />
+        </mxCell>
+
+        <mxCell id="s7" value="&lt;b&gt;7. Learn From Past Days&lt;/b&gt;&lt;br&gt;Nudges the answer using how similar days went before" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#2D6A4F;strokeColor=#40916C;fontColor=#FFFFFF;fontSize=14;spacing=10;" vertex="1" parent="1">
+          <mxGeometry x="60" y="930" width="780" height="70" as="geometry" />
+        </mxCell>
+
+        <mxCell id="s8" value="&lt;b&gt;8. Final Schedule&lt;/b&gt;&lt;br&gt;Power prediction for every 15 minutes, rest of the day. Saved on server, then copied to cloud storage." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#1B4A5E;strokeColor=#2E86AB;fontColor=#FFFFFF;fontSize=14;spacing=10;" vertex="1" parent="1">
+          <mxGeometry x="60" y="1030" width="780" height="80" as="geometry" />
+        </mxCell>
+
+        <mxCell id="s9" value="&lt;b&gt;9. Check Accuracy&lt;/b&gt;&lt;br&gt;Compares schedule to real meter reading. Also compares Enercast's guess, for reference only - never used to build our schedule." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#2D6A4F;strokeColor=#40916C;fontColor=#FFFFFF;fontSize=14;spacing=10;" vertex="1" parent="1">
+          <mxGeometry x="60" y="1140" width="780" height="90" as="geometry" />
+        </mxCell>
+
+        <mxCell id="e0" style="html=1;strokeColor=#40916C;strokeWidth=3;endArrow=block;endFill=1;" edge="1" parent="1" source="s0" target="s1"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e1" style="html=1;strokeColor=#40916C;strokeWidth=3;endArrow=block;endFill=1;" edge="1" parent="1" source="s1" target="s2"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e2" style="html=1;strokeColor=#40916C;strokeWidth=3;endArrow=block;endFill=1;" edge="1" parent="1" source="s2" target="s3"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e3" style="html=1;strokeColor=#40916C;strokeWidth=3;endArrow=block;endFill=1;" edge="1" parent="1" source="s3" target="s4"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e4" style="html=1;strokeColor=#40916C;strokeWidth=3;endArrow=block;endFill=1;" edge="1" parent="1" source="s4" target="s6"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e5" style="html=1;strokeColor=#40916C;strokeWidth=3;endArrow=block;endFill=1;" edge="1" parent="1" source="s5" target="s6"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e6" style="html=1;strokeColor=#40916C;strokeWidth=3;endArrow=block;endFill=1;" edge="1" parent="1" source="s6" target="s7"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e7" style="html=1;strokeColor=#40916C;strokeWidth=3;endArrow=block;endFill=1;" edge="1" parent="1" source="s7" target="s8"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e8" style="html=1;strokeColor=#40916C;strokeWidth=3;endArrow=block;endFill=1;" edge="1" parent="1" source="s8" target="s9"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
