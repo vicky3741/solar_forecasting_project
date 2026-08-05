@@ -95,10 +95,17 @@ class FeatureFusion:
 
     # --------------------------------------------------
 
+    # cloud_field_structure -> extra multiplier on the vision adjustment.
+    # Untested at scale (2026-08-05: 2 real days only) - NOT wired into any
+    # live caller. See tests/test_cloud_structure_amplifier.py before this
+    # is ever passed from predictor.py/pipeline.py.
+    STRUCTURE_MULTIPLIER = {"solid": 1.0, "patchy": 1.5, "broken": 2.0}
+
     def trend_adjustment_profile(self,
                                  vision_features,
                                  horizon_minutes,
-                                 max_adjustment=0.15):
+                                 max_adjustment=0.15,
+                                 structure_multiplier=None):
 
         """
         Per-block vision adjustment, replacing the old flat
@@ -113,6 +120,13 @@ class FeatureFusion:
           - decays with horizon (a single video says little
             about 5+ hours ahead),
           - scales with the vision model's own confidence.
+
+        `structure_multiplier` optionally scales the whole result by
+        STRUCTURE_MULTIPLIER[cloud_field_structure] - patchy/broken skies
+        measured 4.2x worse DSM penalty than calm ones (volatility proxy,
+        2026-08-04), so a patchy/broken read leans harder on vision's
+        directional call instead of smoothing through the spike like
+        persistence does. None (default) = old behavior, unchanged.
 
         Falls back to the old flat behavior when the features
         came from the v1 prompt (no timing fields), and to no
@@ -167,4 +181,10 @@ class FeatureFusion:
         # One video's information goes stale hours out
         staleness = np.exp(-horizon_minutes / 240.0)
 
-        return direction * max_adjustment * confidence * ramp * staleness
+        result = direction * max_adjustment * confidence * ramp * staleness
+
+        if structure_multiplier:
+            structure = vision_features.get("cloud_field_structure")
+            result = result * self.STRUCTURE_MULTIPLIER.get(structure, 1.0)
+
+        return result
