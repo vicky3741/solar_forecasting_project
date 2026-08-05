@@ -27,7 +27,9 @@ from pathlib import Path
 
 import pandas as pd
 from openpyxl import Workbook
-from openpyxl.chart import BarChart, LineChart, Reference
+from openpyxl.chart import AreaChart, BarChart, LineChart, Reference
+from openpyxl.chart.legend import LegendEntry
+from openpyxl.chart.series import SeriesLabel
 from openpyxl.formatting.rule import FormulaRule
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
@@ -154,6 +156,14 @@ def main():
     if has_enercast:
         headers += ["Enercast (MW)", "Enercast Deviation (MW)",
                     "Enercast Deviation % (Capacity)", "Enercast Penalty (Rs)"]
+
+    # Moving penalty band, per mentor's spec (Penalty_band_logic.docx):
+    # width = plant capacity x 10%, centered on the SCHEDULE line, not a
+    # fixed horizontal line. band_width is a genuine constant (upper -
+    # lower always cancels the schedule term to 2 x the half-width), kept
+    # as its own column only so the stacked-area chart trick below can
+    # reference it directly.
+    headers += ["Lower Penalty Band (MW)", "Penalty Band Width (MW)"]
 
     last_col_letter = get_column_letter(len(headers))
 
@@ -302,6 +312,21 @@ def main():
         pen_cell = ws.cell(row=r, column=12, value=penalty_formula("J", r))
         pen_cell.number_format = "0.00"
 
+    # Moving penalty band - every row has a schedule value (0 pre-dawn is
+    # still a valid schedule), so this fills for the whole table, not just
+    # scored rows. Band width formula ties back to installed capacity
+    # (per spec point 5), not a hardcoded 0.51 - if capacity or the slab-1
+    # edge percentage ever changes, this moves with it.
+    band_lower_col = len(headers) - 1
+    band_width_col = len(headers)
+    for r in range(start, last_row + 1):
+        lower_cell = ws.cell(row=r, column=band_lower_col,
+                              value=f"=C{r}-{cap_cell}*10/100")
+        lower_cell.number_format = "0.000"
+        width_cell = ws.cell(row=r, column=band_width_col,
+                              value=f"={cap_cell}*10/100*2")
+        width_cell.number_format = "0.000"
+
     # ---------------- day summary ----------------
     srow = last_row + 2
     ws.cell(row=srow, column=1, value="DAY SUMMARY - ACCURACY AND DSM PENALTY").font = f_section
@@ -427,6 +452,31 @@ def main():
     # ---------------- charts ----------------
     chart_col = get_column_letter(len(headers) + 2)
 
+    # Moving penalty band as a shaded area: openpyxl/Excel has no native
+    # "fill between two lines" series, so this is the standard stacked-
+    # area trick - stack an INVISIBLE area (lower band) with a VISIBLE
+    # one on top of it (band width). Because they stack, the visible
+    # area's top edge lands exactly at lower+width = upper band, and its
+    # bottom edge at lower band - the shaded region IS the band, and it
+    # moves with the schedule line since lower band does.
+    band = AreaChart()
+    band.grouping = "stacked"
+    band.overlap = 100
+
+    band_data = Reference(ws, min_col=band_lower_col, max_col=band_width_col,
+                           min_row=HEAD, max_row=last_row)
+    cats = Reference(ws, min_col=2, min_row=start, max_row=last_row)
+    band.add_data(band_data, titles_from_data=True)
+    band.set_categories(cats)
+
+    lower_series, width_series = band.series
+    lower_series.graphicalProperties.noFill = True
+    lower_series.graphicalProperties.line.noFill = True
+    width_series.graphicalProperties.solidFill = "D9E2F3"
+    width_series.graphicalProperties.line.noFill = True
+    # Named for the legend rather than the raw column header.
+    width_series.tx = SeriesLabel(v="Allowed Band (+/-10% capacity)")
+
     line = LineChart()
     line.title = f"AI Schedule vs Actual Power - {day}"
     line.height, line.width = 9, 24
@@ -436,7 +486,6 @@ def main():
     line.x_axis.title = None
 
     data = Reference(ws, min_col=3, max_col=4, min_row=HEAD, max_row=last_row)
-    cats = Reference(ws, min_col=2, min_row=start, max_row=last_row)
     line.add_data(data, titles_from_data=True)
     line.set_categories(cats)
     line.legend.position = "r"
@@ -470,7 +519,27 @@ def main():
     line.x_axis.delete = False
     line.y_axis.delete = False
 
-    ws.add_chart(line, f"{chart_col}3")
+    # Combine so the band renders as shading BEHIND the schedule/actual
+    # lines, not a separate chart - band first puts it at the back.
+    # openpyxl's ChartBase only overrides __iadd__ (+=), not __add__, so
+    # `band + line` falls through to Serialisable.__add__ and errors on
+    # the type mismatch. Must use += to merge different chart types.
+    # += only merges the series list (_charts) - title/axes/legend/size
+    # stay whatever `band` already had (all defaults), so copy them over
+    # from `line` onto the surviving `band` object explicitly.
+    band.title = line.title
+    band.height, band.width = line.height, line.width
+    band.y_axis.title = line.y_axis.title
+    band.x_axis.title = line.x_axis.title
+    band.x_axis.delete = line.x_axis.delete
+    band.y_axis.delete = line.y_axis.delete
+    band.legend.position = line.legend.position
+    # idx 0 = lower_series, the invisible band-anchor series - hide it from
+    # the legend so only "Allowed Band" (idx 1) shows for the shaded area.
+    band.legend.legendEntry = [LegendEntry(idx=0, delete=True)]
+
+    band += line
+    ws.add_chart(band, f"{chart_col}3")
 
     bar = BarChart()
     bar.type = "col"
