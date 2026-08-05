@@ -157,12 +157,13 @@ def main():
         headers += ["Enercast (MW)", "Enercast Deviation (MW)",
                     "Enercast Deviation % (Capacity)", "Enercast Penalty (Rs)"]
 
-    # Moving penalty band, per mentor's spec (Penalty_band_logic.docx):
-    # width = plant capacity x 10%, centered on the SCHEDULE line, not a
-    # fixed horizontal line. band_width is a genuine constant (upper -
-    # lower always cancels the schedule term to 2 x the half-width), kept
-    # as its own column only so the stacked-area chart trick below can
-    # reference it directly.
+    # Moving penalty band, per mentor's Updated_Penalty_Logic.docx:
+    # width = plant capacity x 10%, centered on the METER/ACTUAL line, not
+    # a fixed horizontal line (and not the schedule line - superseded from
+    # the original Penalty_band_logic.docx). band_width is a genuine
+    # constant (upper - lower always cancels the meter term to 2 x the
+    # half-width), kept as its own column only so the stacked-area chart
+    # trick below can reference it directly.
     headers += ["Lower Penalty Band (MW)", "Penalty Band Width (MW)"]
 
     last_col_letter = get_column_letter(len(headers))
@@ -312,16 +313,17 @@ def main():
         pen_cell = ws.cell(row=r, column=12, value=penalty_formula("J", r))
         pen_cell.number_format = "0.00"
 
-    # Moving penalty band - every row has a schedule value (0 pre-dawn is
-    # still a valid schedule), so this fills for the whole table, not just
-    # scored rows. Band width formula ties back to installed capacity
-    # (per spec point 5), not a hardcoded 0.51 - if capacity or the slab-1
-    # edge percentage ever changes, this moves with it.
+    # Moving penalty band, per Updated_Penalty_Logic.docx: centered on the
+    # METER/ACTUAL line (column D), not the AI schedule line - and only for
+    # blocks with a real meter reading (band = null where meter is missing,
+    # matching the doc's step 3c). Band width formula ties back to installed
+    # capacity (per spec point 6), not a hardcoded 0.51 - if capacity or the
+    # slab-1 edge percentage ever changes, this moves with it.
     band_lower_col = len(headers) - 1
     band_width_col = len(headers)
-    for r in range(start, last_row + 1):
+    for r in scored_rows:
         lower_cell = ws.cell(row=r, column=band_lower_col,
-                              value=f"=C{r}-{cap_cell}*10/100")
+                              value=f"=D{r}-{cap_cell}*10/100")
         lower_cell.number_format = "0.000"
         width_cell = ws.cell(row=r, column=band_width_col,
                               value=f"={cap_cell}*10/100*2")
@@ -458,7 +460,9 @@ def main():
     # one on top of it (band width). Because they stack, the visible
     # area's top edge lands exactly at lower+width = upper band, and its
     # bottom edge at lower band - the shaded region IS the band, and it
-    # moves with the schedule line since lower band does.
+    # moves with the meter/actual line since lower band does. Blank for
+    # blocks with no real meter reading (pre-dawn/post-dusk), which the
+    # chart correctly renders as a gap rather than a shaded 0.
     band = AreaChart()
     band.grouping = "stacked"
     band.overlap = 100
