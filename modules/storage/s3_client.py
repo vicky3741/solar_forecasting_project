@@ -3,20 +3,18 @@
 Solar Forecasting Project
 S3 Storage Client
 =========================================================
-Read/write access to the team-shared AWS S3 bucket that
-Team 3 maintains (the live data lake for meter data,
-Enercast, Windy videos and weather reports).
+
 
 Credentials are read from the environment only
 (AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY, loaded from the
 gitignored .env by config.py) - boto3 picks them up
 automatically, so no secret ever appears in code or config.
 
-Bucket data-lake layout (Team 3's convention):
+Bucket data-lake layout :
     inputs/<state>/<site>/<YYYY-MM-DD>/<DataType>/<file>
     e.g. inputs/MadhyaPradesh/SIRMOUR/2026-07-15/Metered_Data/2026_07_15_SOLAR_INV.csv
 
-This team writes its forecast outputs back under
+This writes its forecast outputs back under
     outputs/team2/SIRMOUR/...
 =========================================================
 """

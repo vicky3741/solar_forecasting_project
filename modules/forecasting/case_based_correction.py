@@ -3,8 +3,7 @@
 Solar Forecasting Project
 Case-Based Correction (k-Nearest-Neighbour retrieval)
 =========================================================
-Adapts teammate Kushal's case-based-reasoning idea to our
-pipeline: instead of a trained model (the LightGBM residual
+Instead of a trained model (the LightGBM residual
 corrector), this looks up the most similar PAST forecast
 situations that already have real measured outcomes, and
 nudges the current forecast by how those analogous cases
