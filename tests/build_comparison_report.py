@@ -27,7 +27,7 @@ Run:  python -m tests.build_comparison_report [YYYY-MM-DD] [friend_xlsx_path]
 =========================================================
 """
 
-import sys
+import argparse
 from pathlib import Path
 
 import openpyxl
@@ -39,12 +39,36 @@ from openpyxl.utils import get_column_letter
 
 from config.config import settings
 
-DAY = sys.argv[1] if len(sys.argv) > 1 else "2026-08-06"
-FRIEND_PATH = Path(sys.argv[2]) if len(sys.argv) > 2 else Path(
-    r"C:\Users\Acer\Downloads\Team2_Sirmour_Schedule_2026-08-06_Final.xlsx"
-)
-OURS_PATH = Path("outputs/reports") / f"Schedule_vs_Meter_Penalty_{DAY}.xlsx"
+def parse_args():
+    """
+    Positionals keep the original `... <day> [friend_xlsx]` form working.
+    --ours-xlsx exists because build_penalty_report.py falls back to a
+    `_1` filename when the canonical report is open in Excel; without it
+    this script would silently read the stale locked copy and pair a fresh
+    friend column with an out-of-date Enercast one.
+    """
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("day", nargs="?", default="2026-08-06")
+    parser.add_argument(
+        "friend_xlsx", nargs="?",
+        default=r"C:\Users\Acer\Downloads\Team2_Sirmour_Schedule_2026-08-06_Final.xlsx",
+    )
+    parser.add_argument(
+        "--ours-xlsx", dest="ours_xlsx", default=None,
+        help="our own report to read Actual/Enercast/our schedule from "
+             "(default: outputs/reports/Schedule_vs_Meter_Penalty_<day>.xlsx)",
+    )
+    return parser.parse_args()
+
+
+ARGS = parse_args()
+DAY = ARGS.day
+FRIEND_PATH = Path(ARGS.friend_xlsx)
 OUT_DIR = Path("outputs/reports")
+OURS_PATH = Path(ARGS.ours_xlsx) if ARGS.ours_xlsx else (
+    OUT_DIR / f"Schedule_vs_Meter_Penalty_{DAY}.xlsx"
+)
 
 CAPACITY_MW = settings["plant"]["capacity_mw"]
 PLANT = settings["plant"]["name"]
