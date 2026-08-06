@@ -265,38 +265,84 @@ modules.
 
 ## Current results (honest)
 
-Backtested point-in-time (no lookahead) across 13 days (Jul 6–18) × 7
-run-times = 91 runs, WITH the Open-Meteo weather signal:
+Backtested point-in-time (no lookahead) across 36 days (Jul 1 – Aug 5) ×
+7 run-times = 252 runs, WITH the Open-Meteo weather signal (refreshed
+2026-08-06):
 
-| Metric (avg over comparable runs) | Ours | Enercast |
+| Metric (avg over the 147 runs Enercast also covers) | Ours | Enercast |
 |---|---|---|
-| Deviation (% of capacity) | 6.85% | 6.68% |
-| Runs won | 41 / 84 | 43 / 84 |
+| Deviation (% of capacity) | 8.11% | 7.89% |
+| Runs won | 80 / 147 | 67 / 147 |
 
-(Before the weather signal we were at 8.6% and won only 24/84 — weather
-closed almost the entire gap to Enercast.)
+Read that honestly: we now **win more runs** than Enercast but sit
+slightly worse on average deviation — i.e. we are ahead more often, and
+behind by more when we are behind. Our bad days are worse than theirs.
 
-Out-of-sample check: parameters tuned on week 1 (Jul 6–12) were tested
-on unseen week 2 (Jul 13–18) and performed *better* there (7.8% vs
-10.0% deviation) — the model generalizes rather than memorizing.
+These numbers are worse than the 6.85% / 6.68% this table showed on 13
+days (Jul 6–18). Nothing regressed — the window grew to include the
+monsoon stretch from Jul 19 on, which is genuinely harder to forecast.
+Comparing a 36-day number against a 13-day one is comparing two different
+questions.
+
+The backtest measures the **base hybrid only**. It does not apply the
+case-based or block bias corrections, so it is a floor, not the shipped
+schedule's accuracy. For that, read the daily reports in
+`outputs/reports/`.
 
 Known limitations, stated plainly:
 
-- **13 days of history** — tuned parameters (chronos_weight 0.2,
+- **36 days of history** — tuned parameters (chronos_weight 0.2,
   performance_ratio 0.80) keep being re-validated as more data arrives.
-- **Windy videos exist for only 1 of 13 days** (July 9). On vision-assisted
-  runs the deviation improved from 5.16% → 4.82%. Daily video capture at
-  every run time is the highest-value data improvement available.
-- **The scheduling-penalty metric is a placeholder** (flat rate beyond a
-  15% dead band) — the real DSM regulation slabs are pending and will be
-  swapped in when provided.
+  The 2026-08-06 tuning grid preferred chronos_weight 0.6 by 0.10 pts
+  (8.35% vs 8.45%) — inside the noise on this much data, so nothing was
+  changed on it. Re-check when the gap is decisive.
+- **The backtest sees almost no vision** — only 4 of its 252 runs have a
+  cloud clip, because `backtester.py` searches the old hand-recorded
+  `data/windy/videos` folder only. Live runs and the daily reports do far
+  better (6–7 clips a day from S3 since the EC2 capture went live). So the
+  backtest is a no-vision floor; do not read it as the vision result.
+- **The backtest's penalty column is still the placeholder** (flat rate
+  beyond a 15% dead band). The real DSM slabs (0–10% free, then 0.50 /
+  0.75 / 1.00 Rs per kWh) are used by the daily penalty reports and by
+  `tests/test_block_bias_experiment.py` — those are the rupee numbers to
+  quote.
 - Plant tilt/azimuth are assumptions (latitude-tilt, south-facing) until
   site-confirmed values arrive.
 
+## Keeping the learned parts fresh
+
+Two components learn from recent days, and they go stale in different
+ways. This is the maintenance the model actually needs:
+
+| Component | Refreshes | If it goes stale |
+|---|---|---|
+| **Block bias profile** | By itself, every run, from the last 5 day schedules | Refuses to run past 3 days old — safe by default |
+| **Case store** (`models/case_store.csv`) | Only when you re-run the two commands below | Keeps applying old analogues; the pipeline logs a warning past 7 days |
+
+The case store rotted exactly this way once: built 2026-07-24 on Jul 6–22,
+still nudging live forecasts a fortnight later with nothing saying so.
+Refresh it after every few new days of meter data:
+
+```bash
+python -m tests.test_preprocessing
+```
+
+```bash
+python -m tests.test_backtest
+```
+
+```bash
+python -m tests.test_case_based_experiment
+```
+
+The last one re-runs the leave-one-day-out verdict and **only saves the
+store if case-based reasoning still helps** — so a refresh can also
+legitimately come back saying "switch this off".
+
 ## Remaining work
 
-- Live data connectors (auto-fetch latest meter data / Windy captures —
-  currently files are dropped into `data/` manually)
-- Real DSM penalty formula (awaiting regulation details)
+- Real DSM penalty formula in the backtest (the daily reports already use
+  the real slabs)
 - Live end-to-end test of the scheduler across a full day
-- Deployment to cloud (Team 3 scope; the FastAPI backend is ready)
+- Backtester should read the S3/auto-captured clips, not just the old
+  `data/windy/videos` folder, so vision is actually measured

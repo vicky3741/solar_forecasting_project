@@ -65,6 +65,7 @@ class CaseBasedCorrector:
         )
 
         self.min_case_days = cfg.get("min_case_days", 8)
+        self.max_store_age_days = cfg.get("max_store_age_days", 7)
         self.capacity_kw = settings["plant"]["capacity_mw"] * 1000
 
         from pathlib import Path
@@ -220,6 +221,43 @@ class CaseBasedCorrector:
 
         store = pd.read_csv(self.case_store_path)
         return store["date"].nunique() >= self.min_case_days
+
+    # --------------------------------------------------
+
+    def staleness_days(self, as_of=None):
+        """
+        How many days old the newest case in the store is.
+        Returns None when there is no store to measure.
+
+        This exists because the store silently rotted once: built
+        2026-07-24 covering Jul 6-22, it was still nudging live
+        forecasts with those analogues two weeks later, and nothing
+        anywhere said so. Unlike the block bias profile this is a
+        WARNING, not a gate - the corrector is worth +0.5 pts and
+        killing it outright on an EC2 box nobody has re-run the
+        backtest on would cost more than the staleness does.
+        Refresh with tests/test_backtest.py then
+        tests/test_case_based_experiment.py.
+        """
+
+        if not self.case_store_path.exists():
+            return None
+
+        store = pd.read_csv(self.case_store_path)
+
+        newest = pd.Timestamp(store["date"].max()).date()
+        reference = pd.Timestamp(as_of).date() if as_of else pd.Timestamp.now().date()
+
+        return (reference - newest).days
+
+    # --------------------------------------------------
+
+    @property
+    def is_stale(self):
+
+        age = self.staleness_days()
+
+        return age is not None and age > self.max_store_age_days
 
     # --------------------------------------------------
 

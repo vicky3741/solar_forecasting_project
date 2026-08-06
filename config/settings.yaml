@@ -130,6 +130,16 @@ case_based_correction:
   k: 40                    # nearest analogues retrieved per block (swept: 20-80 all help)
   strength: 0.5            # CRITICAL: apply only half the retrieved correction. Full strength (1.0) OVERFITS and HURTS (-0.5 pts); 0.5 helps (+0.47 pts, 12/17 unseen days). Re-run tests/test_case_based_experiment.py if the base model changes.
   min_case_days: 8         # too few days = unreliable analogues; stays off until the case store covers this many days (same lesson as residual_correction)
+  # REFRESHED 2026-08-06: the store had been built once on 2026-07-24 covering
+  # Jul 6-22 and was still nudging live forecasts with those analogues two weeks
+  # later, silently. Rebuilt on all 36 days (Jul 1 - Aug 5): leave-one-day-out
+  # +0.501 pts, 25/36 days helped, so the verdict still ships it.
+  # This is a WARNING threshold, not a gate - past it the pipeline logs that the
+  # store is old, but keeps applying it. Disabling a validated +0.5 pts on an
+  # EC2 box nobody has re-run the backtest on would cost more than the staleness.
+  # To refresh: python -m tests.test_backtest, then
+  #             python -m tests.test_case_based_experiment
+  max_store_age_days: 7
   case_store_path: models/case_store.csv  # written by tests/test_case_based_experiment.py after a positive verdict
   weights:
     block_hour: 2.0        # time-of-day (solar-elevation proxy) matters most

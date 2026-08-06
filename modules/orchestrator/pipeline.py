@@ -363,6 +363,16 @@ class Orchestrator:
         # days; only runs when enabled and the case store has enough
         # history (see modules/forecasting/case_based_correction.py).
         if self.case_corrector.available:
+
+            if self.case_corrector.is_stale:
+                self.logger.warning(
+                    "Case store is "
+                    f"{self.case_corrector.staleness_days()} days old - live "
+                    "forecasts are being nudged by analogues that stop before "
+                    "recent weather. Refresh: python -m tests.test_backtest "
+                    "then python -m tests.test_case_based_experiment"
+                )
+
             self.case_corrector.load()
             forecast = self.case_corrector.apply(
                 forecast,
