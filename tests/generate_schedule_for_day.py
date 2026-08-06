@@ -33,6 +33,7 @@ from pathlib import Path
 import pandas as pd
 
 from config.config import settings
+from modules.forecasting.block_bias_correction import BlockBiasCorrector
 from modules.forecasting.case_based_correction import CaseBasedCorrector
 from modules.forecasting.predictor import HybridPredictor
 from modules.fusion.fusion import FeatureFusion
@@ -97,6 +98,10 @@ def build_schedule(data, day, provider):
     if corrector.available:
         corrector.load()
 
+    # Learns only from day schedules BEFORE this day, so rebuilding an
+    # old day never sees its own outcome (or any later day's).
+    block_bias = BlockBiasCorrector().load(as_of=day)
+
     schedule = {}          # timestamp -> dict(value, source run, had vision)
     run_log = []
     per_run = []           # every run's own full schedule, block T -> end of day
@@ -119,9 +124,12 @@ def build_schedule(data, day, provider):
 
         forecast = predictor.blend_signals(signals, vision_adjustment=adjustment)
 
-        # Same correction the live pipeline applies.
+        # Same corrections the live pipeline applies, in the same order.
         if corrector.available:
             forecast = corrector.apply(forecast, run_time, signals["kt_now"])
+
+        if block_bias.available:
+            forecast = block_bias.apply(forecast)
 
         written = 0
         for timestamp, value in zip(forecast["timestamp"], forecast["final_forecast_kw"]):
@@ -149,6 +157,7 @@ def build_schedule(data, day, provider):
             "vision_signal": "yes" if features is not None else "no",
             "blocks_written": written,
             "weather_bias_factor": round(signals.get("weather_bias_factor", 1.0), 3),
+            "block_bias_days": len(block_bias.days_used) if block_bias.available else 0,
         })
 
     rows = [

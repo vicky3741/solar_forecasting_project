@@ -46,9 +46,10 @@ Plant location ─────► pvlib clear-sky physics ───────�
 5. **Open-Meteo (weather forecast)** — free, no API key. Supplies a
    *forward-looking* forecasted GHI for every future block (the one
    thing the other signals lack). Converted to a forecasted clear-sky
-   index and blended in at weight 0.65 (tuned + leave-one-day-out
-   validated). This was the single biggest accuracy gain — it closed
-   the gap to Enercast from ~2 points to ~0.17.
+   index and blended in at weight 0.25 (tuned + leave-one-day-out
+   validated; re-tuned down from 0.65 on 2026-08-04). This was the
+   single biggest accuracy gain — it closed the gap to Enercast from
+   ~2 points to ~0.17.
 6. **Enercast** — used strictly as a validation benchmark, never as a
    model input.
 
@@ -81,6 +82,50 @@ correction *hurts* until ~7-8 days of mistake history exist. Re-evaluate
 by rerunning `tests/test_residual_experiment.py` if the base model
 changes; re-enable only if it helps out-of-sample again.
 
+### Block bias correction (time-of-day shape) — ACTIVE
+
+Added 2026-08-06 on mentor guidance: *"analyze the pattern of the
+results for the last 4-5 days … identify the pattern among the blocks
+causing higher penalties & convey the same to the model."*
+
+`tests/test_block_penalty_pattern.py` is the analysis. On the last 5
+finished days it found:
+
+- **100% of the DSM penalty falls in blocks 40–67 (09:45–16:30).**
+  Everywhere else the plant is small enough that even a total miss
+  stays inside the free ±0.51 MW (10% of capacity) dead band — those
+  blocks cannot cost money, so accuracy there is not worth buying.
+- **Half the penalty comes from 7 blocks out of 49.**
+- Inside the paying window the schedule carries a repeating
+  **time-of-day shape**: the late morning is over-forecast, the
+  mid-afternoon under-forecast by ~0.34 MW on 4 of the last 5 days.
+
+`modules/forecasting/block_bias_correction.py` feeds that back: each
+block is shifted by **half** the median (actual − scheduled) that block
+showed over the last 5 finished days, smoothed over ±6 blocks (±90 min).
+
+Validated recursively walk-forward over 12 days
+(`tests/test_block_bias_experiment.py`) — training days are themselves
+corrected, which is what deployment actually looks like:
+
+| | |
+|---|---|
+| Penalty before | Rs 990 / day |
+| Penalty after | Rs 950 / day (**−4.0%**) |
+| Unseen days cheaper | 5 / 7 |
+| Deviation | −0.10 pts |
+
+The **control** matters as much as the result: a flat whole-day shift
+(same data, no block shape) made the penalty *worse* at every setting.
+The money really is in the time-of-day pattern, not the overall level.
+Two other negative results are baked into the settings — unsmoothed
+per-block medians hurt (5 days is 5 noisy samples per block), and full
+strength hurts (same lesson as the case-based corrector).
+
+The profile is **rebuilt at run time** from the recent day schedules and
+refuses to run if the newest is more than 3 days old, so it cannot go
+stale the way a saved-once model can.
+
 ## Project structure
 
 ```
@@ -95,7 +140,9 @@ modules/
   vision/          Frame extraction -> Gemini -> JSON parsing (cached per video)
   fusion/          Vision features -> per-block forecast adjustment profile
   forecasting/     clearsky.py (pvlib), chronos_model.py, predictor.py (hybrid),
-                   residual_correction.py (LightGBM error-learning)
+                   residual_correction.py (LightGBM error-learning),
+                   case_based_correction.py (kNN analogues),
+                   block_bias_correction.py (time-of-day penalty shape)
   evaluation/      metrics.py, evaluator.py, backtester.py (+ tuning grid)
   orchestrator/    pipeline.py - one full forecast run end to end
   scheduler/       Auto-triggers the orchestrator at the 7 daily run times
@@ -180,15 +227,26 @@ automatically; leave it out and they simply omit the Enercast columns.
 
 **2. Real unit/smoke tests** - `test_preprocessing.py`, `test_predictor.py`,
 `test_evaluator.py`, `test_fusion.py`, `test_clearsky.py`,
-`test_orchestrator.py`, `test_s3.py`, `test_vision.py`. Run any of them to
-check a module still works.
+`test_orchestrator.py`, `test_s3.py`, `test_vision.py`,
+`test_block_bias.py`. Run any of them to check a module still works.
 
 **3. Tuning experiments** - `test_weather_bias_experiment.py`,
 `test_case_based_experiment.py`, `test_residual_experiment.py`,
-`test_walkforward_experiment.py` and friends. These are the evidence
-behind the tuned numbers in `config/settings.yaml`; each setting's comment
-names the experiment that produced it. You do not run these to make a
-report - only to re-validate a setting after changing the model.
+`test_walkforward_experiment.py`, `test_block_bias_experiment.py` and
+friends. These are the evidence behind the tuned numbers in
+`config/settings.yaml`; each setting's comment names the experiment that
+produced it. You do not run these to make a report - only to re-validate
+a setting after changing the model.
+
+**4. Pattern analysis** - `test_block_penalty_pattern.py`. Reads the last
+N finished day schedules and reports which blocks carry the DSM penalty,
+whether each block misses in a repeatable direction, and how consistent
+that is day to day. Run it after a few new days land to see whether the
+pattern the model is being taught still holds:
+
+```bash
+python -m tests.test_block_penalty_pattern 5
+```
 
 **Every tuned constant lives in `config/settings.yaml`**, with a comment
 saying what tuned it and when. Change behaviour there rather than in the

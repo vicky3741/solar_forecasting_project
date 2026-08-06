@@ -36,6 +36,7 @@ from modules.preprocessing.preprocess import DataPreprocessor
 from modules.forecasting.predictor import HybridPredictor
 from modules.forecasting.residual_correction import ResidualCorrector
 from modules.forecasting.case_based_correction import CaseBasedCorrector
+from modules.forecasting.block_bias_correction import BlockBiasCorrector
 from modules.evaluation.evaluator import Evaluator
 from modules.vision.vision_module import VisionModule
 from modules.fusion.fusion import FeatureFusion
@@ -54,6 +55,7 @@ class Orchestrator:
         self.predictor = HybridPredictor()
         self.corrector = ResidualCorrector()
         self.case_corrector = CaseBasedCorrector()
+        self.block_bias = BlockBiasCorrector()
         self.evaluator = Evaluator()
         self.vision = VisionModule()
         self.fusion = FeatureFusion()
@@ -368,6 +370,20 @@ class Orchestrator:
                 signals["kt_now"]
             )
             self.logger.info("Case-based correction applied")
+
+        # Block bias correction (MENTOR GUIDANCE 2026-08-06): shift each
+        # 15-min block by half the median miss that block showed over the
+        # last few finished days. Learns from the reconstructed day
+        # schedules strictly BEFORE today, and refuses to run when those
+        # are stale - see modules/forecasting/block_bias_correction.py.
+        self.block_bias.load(as_of=run_time.date())
+
+        if self.block_bias.available:
+            forecast = self.block_bias.apply(forecast)
+            self.logger.info(
+                "Block bias correction applied "
+                f"(learned from {len(self.block_bias.days_used)} days)"
+            )
 
         run_label = run_time.strftime("%Y-%m-%d_%H-%M")
 

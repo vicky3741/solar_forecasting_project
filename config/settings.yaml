@@ -137,6 +137,37 @@ case_based_correction:
     final_forecast_kw: 1.5
     horizon_min: 1.0
 
+block_bias_correction:
+  # ADDED 2026-08-06 on MENTOR GUIDANCE: "analyze the pattern of the results for
+  # the last 4-5 days ... identify the pattern among the blocks causing higher
+  # penalties & convey the same to the model."
+  #
+  # tests/test_block_penalty_pattern.py found that pattern: 100% of the DSM
+  # penalty falls in blocks 40-67 (09:45-16:30) - outside that window the plant
+  # is too small for any miss to leave the free 10% dead band - and inside it the
+  # schedule carries a repeating TIME-OF-DAY SHAPE (late morning over-forecast,
+  # mid-afternoon under-forecast by ~0.34 MW on 4 of the last 5 days).
+  #
+  # This shifts each block by half the median (actual - scheduled) of the last
+  # `lookback_days` finished days. Values below are the only ones that saved
+  # money at EVERY lookback tested (3/4/5/7 days) in the recursive walk-forward -
+  # see tests/test_block_bias_experiment.py, which is what decides `enabled`.
+  #
+  # VERDICT 2026-08-06 (recursive walk-forward, 12 reconstructed days): Rs 40/day
+  # cheaper (-4.0%), 5 of 7 unseen days cheaper, deviation -0.10 pts. The CONTROL
+  # matters as much as the result: a flat whole-day shift (same data, no block
+  # shape) made the penalty WORSE at every setting, so the money really is in the
+  # time-of-day pattern the mentor pointed at, not in the overall level.
+  enabled: true
+  lookback_days: 5         # the mentor's "last 4-5 days"; also matches weather.bias_correction.window_days
+  strength: 0.5            # apply HALF the measured bias. Same lesson as case_based_correction: history hints at a bias, it does not dictate a value. Full strength overfits and costs money.
+  smooth_blocks: 6         # average the profile over +/-6 blocks (+/-90 min). A raw per-block median off 5 days is 5 noisy samples; unsmoothed it made the penalty WORSE. The recoverable pattern is a broad shape, not a per-block offset.
+  min_days: 4              # below this the profile is guesswork - corrector stays off
+  min_block_samples: 2     # a block seen on fewer days than this gets no shift (stops the smoother bleeding a dawn bias into empty night blocks)
+  max_shift_mw: 1.0        # safety rail; the validated profile never approaches this
+  max_profile_age_days: 3  # refuse to correct today with a stale shape. The case store went stale exactly this way (built 2026-07-24, still serving Jul 6-22 analogues weeks later) - this gate is why that cannot happen here.
+  schedule_dir: outputs/schedules   # rebuilt daily by tests/generate_schedule_for_day.py
+
 clearsky:
   model: ineichen          # pvlib clear-sky model; free, no external data/API needed
   performance_ratio: 0.80  # RE-TUNED 2026-07-19 on the full 13-day dataset (Jul 6-18): grid best was 0.75 (8.596%) with 0.80 statistically tied (8.605%); 0.80 chosen as it ranked top-2 in BOTH tuning windows (week-1-only grid favored 0.85, full-data favors 0.75) - the stable middle. Re-tune as more days arrive.

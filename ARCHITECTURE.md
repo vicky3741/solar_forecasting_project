@@ -33,8 +33,9 @@ flowchart TD
 
     BL --> CS["Multiply by clear-sky curve<br/>pvlib Ineichen, PR 0.80<br/>= megawatts per block"]
     CS --> CB["Case-based correction<br/>40 analogue situations, half strength"]
+    CB --> BB["Block bias correction<br/>time-of-day shape, last 5 days, half strength"]
 
-    CB --> OUT["4 output files<br/>forecast, archive, schedule, validation"]
+    BB --> OUT["4 output files<br/>forecast, archive, schedule, validation"]
     OUT --> S3
     OUT --> APP["FastAPI dashboard<br/>+ 3 JSON endpoints"]
 ```
@@ -77,14 +78,22 @@ out-of-sample.
 
 | Signal | What it knows | Weight |
 |---|---|---|
-| **Weather forecast** | Sunlight still to come — the only forward-looking input | **0.65** |
+| **Weather forecast** | Sunlight still to come — the only forward-looking input | **0.25** (re-tuned down from 0.65 on 2026-08-04) |
 | **Persistence** | Today's most recent measured reading, carried forward flat | Bulk of the remainder |
 | **Chronos** | The shape of today's readings so far, extended by a pretrained time-series model | 0.20, scaled down until enough of today is observed |
 | **Cloud video** | Whether cloud is moving in or clearing, read from a Windy satellite clip | Adjusts persistence only; capped near ±4% of the final number |
 
-The blended index is then multiplied by the clear-sky power curve, and finally
-nudged by a **case-based correction**: the 40 most similar past situations
-that have real measured outcomes, applied at half strength.
+The blended index is then multiplied by the clear-sky power curve and nudged
+twice, each at half strength:
+
+- a **case-based correction** — the 40 most similar past situations that have
+  real measured outcomes;
+- a **block bias correction** — the median miss each 15-minute block showed
+  over the last 5 finished days, smoothed over ±90 minutes. This is the
+  time-of-day gating that §6 had left open: the schedule runs high in the late
+  morning and low in the mid-afternoon, and every rupee of DSM penalty falls
+  in blocks 40–67 (09:45–16:30), so that is the only stretch where correcting
+  anything can save money.
 
 ---
 
@@ -104,7 +113,7 @@ solarpower and clouds layers, and uploads them to the team's S3 bucket.
    Each day is processed independently so nothing interpolates across the
    overnight gap.
 3. Compute the four signals.
-4. Blend, convert to power, apply the case-based correction.
+4. Blend, convert to power, apply the case-based and block bias corrections.
 5. Write four outputs and push them back to S3.
 
 The two processes are deliberately separate: the browser and the Chronos
@@ -207,7 +216,10 @@ tuning never saw. Recording the negatives matters as much as the positives.
 | ECMWF direct feed (no middleman) | Tracks Open-Meteo within ~36 W/m² | **Off on purpose.** Open-Meteo provides a forecast *archive* and hourly resolution; going direct would end our ability to prove future improvements. |
 | Cloud-cover percentage as the weather input | Misleading with thin cirrus | Use shortwave radiation instead. |
 | Optical-flow cloud motion as a predictor | Correlation +0.16 where a useful signal would be negative | Not used in the forecast. Monsoon cloud here builds convectively rather than drifting in, so past motion carries no forward information. |
-| Vision weight sweep | No measurable effect at the shipped strength; consistently hurts mornings, helps afternoons | Kept at low strength. Time-of-day gating is the open lead. |
+| Vision weight sweep | No measurable effect at the shipped strength; consistently hurts mornings, helps afternoons | Kept at low strength. Time-of-day gating was the open lead — now closed by the block bias correction below. |
+| Flat whole-day bias shift (control for the block bias correction) | Made the penalty **worse** at every strength tested | Rejected. The recoverable error is a time-of-day *shape*, not a level. |
+| Per-block bias medians, unsmoothed | Worse than baseline above half strength | Smooth over ±6 blocks. Five days gives five samples per block — the raw median is mostly noise. |
+| Block bias correction, ±90 min smoothing, half strength | Rs 40/day cheaper (−4.0%), 5 of 7 unseen days, −0.10 pts | **Shipped 2026-08-06.** Saves money at every lookback tested (3/4/5/7 days). |
 
 ---
 
