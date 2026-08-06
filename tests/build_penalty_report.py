@@ -19,12 +19,25 @@ the DSM slab parameters at the bottom of the sheet, so the
 sheet recalculates if the slab rates or capacity ever change.
 
 Run:  python -m tests.build_penalty_report [YYYY-MM-DD]
+
+To grade a schedule that came from somewhere other than our own
+pipeline - a teammate running a modified pipeline delivers a report in
+this same layout - point --from-xlsx at their file and tag the output
+so it cannot be confused with ours:
+
+  python -m tests.build_penalty_report 2026-08-06 \
+      --from-xlsx "path/to/theirs.xlsx" --tag Friend
+
+Everything else (meter data, Enercast, DSM slabs, penalty band, charts,
+summary) stays exactly as it is for our own report, so the two are
+directly comparable.
 =========================================================
 """
 
-import sys
+import argparse
 from pathlib import Path
 
+import openpyxl
 import pandas as pd
 from openpyxl import Workbook
 from openpyxl.chart import AreaChart, BarChart, LineChart, Reference
@@ -38,7 +51,33 @@ from config.config import settings
 from modules.evaluation.evaluator import Evaluator
 from modules.preprocessing.preprocess import DataPreprocessor
 
-DAY = sys.argv[1] if len(sys.argv) > 1 else "2026-07-25"
+def parse_args():
+    """
+    Positional day keeps the original `python -m tests.build_penalty_report
+    2026-08-06` form working unchanged. --from-xlsx swaps ONLY the AI
+    Schedule column for one read out of an already-built report in this
+    same layout (a teammate running their own modified pipeline delivers
+    one of those), so their schedule gets graded by the exact same meter
+    data, DSM slabs, band logic and charts ours does.
+    """
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("day", nargs="?", default="2026-07-25")
+    parser.add_argument(
+        "--from-xlsx", dest="from_xlsx", default=None,
+        help="read the AI Schedule from this report-format xlsx instead of "
+             "outputs/schedules/day_schedule_<day>.csv",
+    )
+    parser.add_argument(
+        "--tag", default="",
+        help="suffix for the output filename and a label in the sheet title, "
+             "e.g. --tag Friend",
+    )
+    return parser.parse_args()
+
+
+ARGS = parse_args()
+DAY = ARGS.day
 SCHEDULE_DIR = Path("outputs/schedules")
 OUT_DIR = Path("outputs/reports")
 
@@ -86,7 +125,48 @@ def load_full_day_actual(day):
     return frame[columns]
 
 
-def build_rows(day):
+def load_schedule_from_xlsx(path, day):
+    """
+    AI Schedule column out of an already-built report in this same layout.
+    Timestamps are rebuilt from the Block number rather than the Time
+    string, since the two report generations format Time differently
+    ("07:00" vs "07:00-07:15") while the block number means the same thing
+    in both - block 1 is 00:00-00:15.
+    """
+
+    worksheet = openpyxl.load_workbook(path, data_only=True).active
+
+    header_row = next(
+        (row[0].row for row in worksheet.iter_rows(min_row=1, max_row=10)
+         if row[0].value == "Block"),
+        None,
+    )
+
+    if header_row is None:
+        raise ValueError(f"{path}: no 'Block' header found in the first 10 rows")
+
+    midnight = pd.Timestamp(day).normalize()
+    records = []
+
+    for row in worksheet.iter_rows(min_row=header_row + 1, max_row=worksheet.max_row):
+        block, scheduled_mw, scheduled_at = row[0].value, row[2].value, row[7].value
+
+        if not isinstance(block, int):
+            break
+
+        if scheduled_mw is None:
+            continue
+
+        records.append({
+            "timestamp": midnight + pd.Timedelta(minutes=15 * (block - 1)),
+            "scheduled_mw": float(scheduled_mw),
+            "scheduled_at": scheduled_at,
+        })
+
+    return pd.DataFrame(records)
+
+
+def build_rows(day, schedule_xlsx=None):
     """
     Every block from the day's earliest meter reading to the last
     scheduled block, merging in the reconstructed schedule. Blocks
@@ -95,9 +175,13 @@ def build_rows(day):
     blank rather than guessed.
     """
 
-    schedule = pd.read_csv(
-        SCHEDULE_DIR / f"day_schedule_{day}.csv", parse_dates=["timestamp"]
-    )
+    if schedule_xlsx is not None:
+        schedule = load_schedule_from_xlsx(schedule_xlsx, day)
+    else:
+        schedule = pd.read_csv(
+            SCHEDULE_DIR / f"day_schedule_{day}.csv", parse_dates=["timestamp"]
+        )
+
     actual = load_full_day_actual(day)
 
     merged = actual.merge(
@@ -133,8 +217,13 @@ def build_rows(day):
 def main():
 
     day = pd.Timestamp(DAY).date()
-    rows = build_rows(DAY)
+    rows = build_rows(DAY, schedule_xlsx=ARGS.from_xlsx)
     has_enercast = "enercast_kw" in rows.columns and rows["enercast_kw"].notna().any()
+
+    # e.g. " (Friend pipeline)" in the sheet title and "_Friend" on the file,
+    # so a second pipeline's report never overwrites or gets mistaken for ours.
+    title_label = f" [{ARGS.tag}]" if ARGS.tag else ""
+    file_suffix = f"_{ARGS.tag}" if ARGS.tag else ""
 
     wb = Workbook()
     ws = wb.active
@@ -170,7 +259,7 @@ def main():
 
     ws.merge_cells(f"A1:{last_col_letter}1")
     ws.cell(row=1, column=1,
-            value=f"{PLANT} - AI Schedule vs Actual with DSM Penalty - {day}"
+            value=f"{PLANT} - AI Schedule vs Actual with DSM Penalty - {day}{title_label}"
             ).font = f_section
     ws.merge_cells(f"A2:{last_col_letter}2")
 
@@ -482,7 +571,7 @@ def main():
     width_series.tx = SeriesLabel(v="Allowed Band (+/-10% capacity)")
 
     line = LineChart()
-    line.title = f"AI Schedule vs Actual Power - {day}"
+    line.title = f"AI Schedule vs Actual Power - {day}{title_label}"
     line.height, line.width = 9, 24
     line.y_axis.title = "MW"
     # No x-axis title: the category labels are plainly times, and an axis
@@ -547,7 +636,7 @@ def main():
 
     bar = BarChart()
     bar.type = "col"
-    bar.title = f"DSM Penalty per Block (Rs) - {day}"
+    bar.title = f"DSM Penalty per Block (Rs) - {day}{title_label}"
     bar.height, bar.width = 8, 24
     bar.y_axis.title = "Rs"
     bar.x_axis.title = None
@@ -594,7 +683,7 @@ def main():
     ws.freeze_panes = ws.cell(row=start, column=1)
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
-    xlsx_path = OUT_DIR / f"Schedule_vs_Meter_Penalty_{DAY}.xlsx"
+    xlsx_path = OUT_DIR / f"Schedule_vs_Meter_Penalty_{DAY}{file_suffix}.xlsx"
     target = xlsx_path
     for attempt in range(1, 20):
         try:
