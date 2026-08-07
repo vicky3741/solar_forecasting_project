@@ -1,0 +1,126 @@
+# ============================================================
+# Plant overlay: BHUPALPALLY (Telangana, 10 MW)
+# ============================================================
+# Merged over config/settings.yaml when SOLAR_PLANT=bhupalpally.
+# Anything not listed here is inherited from that file.
+#
+# Structurally identical to config/plants/kasipet.yaml - same vendor
+# export format, same Telangana scheduling rules - but every path,
+# prefix, port and log file is its own, so the two Telangana plants are
+# as independent of each other as they are of Sirmour. Read the notes
+# in kasipet.yaml for why each block is here; they apply verbatim.
+#
+# The inherited blend/clear-sky/weather constants are Sirmour-tuned and
+# are a starting point only. Re-tune with:
+#     SOLAR_PLANT=bhupalpally python -m tests.test_backtest
+# ============================================================
+
+plant:
+  key: bhupalpally
+  code: BHUPALPALLY
+  state: Telangana
+  name: Bhupalpally Solar Plant
+  latitude: 18.447931
+  longitude: 79.877263
+  altitude_m: 0            # not provided in the site details, same assumption as Sirmour
+  capacity_mw: 10.0
+  tilt_deg: 18.45          # ASSUMPTION: not provided; set equal to latitude (fixed-tilt heuristic) - update when the site confirms
+  azimuth_deg: 180         # ASSUMPTION: true south, standard for the northern hemisphere
+  timezone: Asia/Kolkata
+
+forecast:
+  interval_minutes: 15
+  forecast_end_time: "19:00"
+  output_frequency: 15
+  # Eight scheduling times - the Telangana family gets the 17:15 run
+  # (engine block 70) that Sirmour does not have.
+  run_times: ["06:45", "08:15", "09:45", "11:15", "12:45", "14:15", "15:45", "17:15"]
+
+data_schema:
+  timestamp_column: Timestamp
+  dayfirst: true
+  column_map:
+    active_power-avg_mfm-out_kw: active_power_kw
+    ghi_w_w_m2: ghi_w_m2
+    module_temperature_c: mod_temp
+    ambient_temperature_c: amb_temp
+  timestamp_shift_minutes: 0
+
+# 3 blocks / 45 minutes. The guide names Kothagudem and Kasipet
+# explicitly; Bhupalpally is the same Telangana scheduling regime, so it
+# follows the same rule. Flagged to the mentor - change this one line if
+# Bhupalpally is confirmed to be on the 6-block rule instead.
+schedule_rules:
+  freeze_blocks: 3
+
+enercast:
+  enabled: false
+  filename_prefix: Bhupalpally
+
+paths:
+  raw_data: data/plants/bhupalpally/raw
+  processed_data: data/plants/bhupalpally/processed
+  historical_data: data/plants/bhupalpally/historical
+  meter_data: data/plants/bhupalpally/meter
+  site_data: data/plants/bhupalpally/site
+  weather_data: data/plants/bhupalpally/weather
+  windy_data: data/plants/bhupalpally/windy
+  enercast_data: data/plants/bhupalpally/enercast
+
+outputs:
+  forecasts: outputs/plants/bhupalpally/forecasts
+  schedules: outputs/plants/bhupalpally/schedules
+  reports: outputs/plants/bhupalpally/reports
+  json: outputs/plants/bhupalpally/json
+  extracted_frames: outputs/plants/bhupalpally/extracted_frames
+
+storage:
+  site_prefix: inputs/Telangana/BHUPALPALLY
+  video_prefix: videos/Telangana/BHUPALPALLY
+  video_cache: data/plants/bhupalpally/windy/s3_cache
+  output_prefix: outputs/team2/BHUPALPALLY
+
+windy_capture:
+  video_dir: data/plants/bhupalpally/windy/new_videos
+  screenshot_dir: data/plants/bhupalpally/windy/screenshots
+  session_file: windy_session.json
+
+weather:
+  cache_dir: data/plants/bhupalpally/weather/openmeteo_cache
+  ecmwf_direct:
+    cache_dir: data/plants/bhupalpally/weather/ecmwf_direct
+
+clearsky:
+  # CALIBRATED 2026-08-08 on all 37 days (tests/tune_plant_clearsky.py):
+  # a clean interior optimum at 1.00, worth +0.75 pct points against the
+  # 0.80 inherited from Sirmour (8.147% -> 7.398% average deviation).
+  #
+  # Same reasoning as Kasipet's: this constant is per site, not
+  # statistical, and inheriting Sirmour's value set the forecast ceiling
+  # too low - the first reconstruction of 2026-08-06 came out 15% short
+  # on daily energy. A ratio this close to 1.0 is what a DC-oversized
+  # site looks like against a GHI-based clear-sky curve, where the tilt
+  # gain offsets the conversion losses; it is a fitted scale factor, not
+  # a claim that the plant is 100% efficient.
+  performance_ratio: 1.0
+
+residual_correction:
+  model_path: models/plants/bhupalpally/residual_lgbm.txt
+
+case_based_correction:
+  # BUILT 2026-08-08 on all 37 days. Leave-one-day-out verdict: +0.530 pct
+  # points, 28 of 37 unseen days helped - so it ships, at the same half
+  # strength Sirmour uses. Rebuild after a run of new days with:
+  #     SOLAR_PLANT=bhupalpally python -m tests.test_backtest
+  #     SOLAR_PLANT=bhupalpally python -m tests.test_case_based_experiment
+  case_store_path: models/plants/bhupalpally/case_store.csv
+
+block_bias_correction:
+  schedule_dir: outputs/plants/bhupalpally/schedules
+
+scheduler:
+  single_instance_port: 49734   # Sirmour 49732, Kasipet 49733
+  run_offset_seconds: 600       # 10 min behind Sirmour, 5 behind Kasipet - three peaks in a row, never at once
+
+logging:
+  log_file: bhupalpally.log
