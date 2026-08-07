@@ -49,3 +49,13 @@ data/windy/flow_cache/
 
 # Scratch space for one-off evaluation runs - never an input to anything.
 data/tmp_eval/
+
+# ---- Multi-plant (Kasipet / Bhupalpally), same rules as Sirmour above ----
+# Meter history IS tracked (it is the model's input and the graded truth),
+# but the re-fetchable and large-binary artifacts are not.
+data/plants/*/windy/s3_cache/
+data/plants/*/windy/new_videos/
+data/plants/*/windy/screenshots/
+data/plants/*/windy/flow_cache/
+data/plants/*/weather/openmeteo_cache/
+data/plants/*/weather/ecmwf_direct/

@@ -13,11 +13,12 @@ from pathlib import Path
 import pandas as pd
 
 from modules.forecasting.clearsky import ClearSkyModel
+from utils.file_manager import processed_data_path
 
 
 def main():
 
-    processed_file = Path("data/processed/processed_data.csv")
+    processed_file = processed_data_path()
 
     dataframe = pd.read_csv(processed_file, parse_dates=["timestamp"])
 

@@ -1,8 +1,63 @@
 # Solar generation forecasting — Team 2 approach
 
-Sirmour Solar Plant, 5.1 MW, Madhya Pradesh. Automated day-ahead and
-intraday generation schedule at 15-minute resolution (96 blocks), refreshed
-7 times a day at the run times set by the mentor brief.
+Three plants — Sirmour (5.1 MW, Madhya Pradesh), Kasipet (15 MW, Telangana)
+and Bhupalpally (10 MW, Telangana). Each gets an automated intraday
+generation schedule at 15-minute resolution (96 blocks), refreshed at the
+run times set by the mentor brief: 7 a day for Sirmour, 8 for the two
+Telangana plants.
+
+---
+
+## 0. Three plants, one pipeline
+
+The diagram below describes **one** plant. It runs three times over, as
+three independent processes, and the three share no state at all.
+
+```mermaid
+flowchart LR
+    ENV["SOLAR_PLANT"] --> CFG["config/config.py"]
+    BASE["config/settings.yaml<br/>the base layer<br/><b>= Sirmour</b>"] --> CFG
+    OV["config/plants/&lt;key&gt;.yaml<br/>overlay: coords, capacity,<br/>paths, prefixes, run times,<br/>freeze horizon, ports"] --> CFG
+    CFG --> SET["one resolved<br/><b>settings</b> object"]
+    SET --> M["every module<br/>(none of them knows<br/>plants exist)"]
+```
+
+Every module already read a single `settings` object, so re-pointing that
+object re-points the entire pipeline. That is the whole mechanism.
+
+What each plant owns separately: meter folder, processed dataset, output
+folders, S3 site/video/output prefixes, Open-Meteo cache (keyed by date and
+model only, so sharing it would serve Madhya Pradesh's irradiance to
+Telangana), case store, block-bias history, log file, scheduler lock port,
+Windy API key, and a systemd unit of its own.
+
+`settings.yaml` is Sirmour and stays Sirmour: `config/plants/sirmour.yaml`
+is nearly empty, so with `SOLAR_PLANT` unset the resolved configuration is
+byte-identical to what the live automation has always used. Every
+plant-specific knob added for the new plants carries Sirmour's existing
+behaviour as its default.
+
+### Effective time — where the three plants genuinely differ
+
+The mentor's *Effective Time Schedule Guide* (2026-08-08): a newly
+generated schedule does not take effect immediately. The next few blocks
+are already declared to the grid operator and stay at the previous
+schedule's values.
+
+| Run at | Engine block | Sirmour (6) | Kasipet / Bhupalpally (3) |
+|---|---|---|---|
+| 11:15 | 46 | freeze 46–51, new from 52 (12:45) | freeze 46–48, new from 49 (12:00) |
+
+`modules/scheduling/effective_time.py`, configured as
+`schedule_rules.freeze_blocks`. This is why the same day's final schedule
+report differs between plants. A block is only frozen if the previous
+schedule actually has a value for it — the guide's own exception, and
+without it the first run of the day would leave a hole between where it
+stops and where the next run starts.
+
+Sirmour currently runs at 0, not 6: it has always published without a
+freeze horizon and every tuned constant was validated against that. See the
+note in the README before changing it.
 
 ---
 

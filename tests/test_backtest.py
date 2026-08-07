@@ -15,19 +15,30 @@ from pathlib import Path
 
 import pandas as pd
 
+from config.config import settings
 from modules.evaluation.backtester import Backtester
+from utils.file_manager import processed_data_path, reports_path
 
 
 def main():
 
-    processed_file = Path("data/processed/processed_data.csv")
+    processed_file = processed_data_path()
+
+    if not processed_file.exists():
+        print(
+            f"{processed_file} does not exist yet. Build it first:\n"
+            f"    SOLAR_PLANT={settings['plant']['key']} "
+            "python -m tests.test_preprocessing"
+        )
+        return
 
     dataframe = pd.read_csv(processed_file, parse_dates=["timestamp"])
 
     backtester = Backtester()
 
     print("=" * 60)
-    print("Running backtest across all days and official run-times")
+    print(f"Backtest - {settings['plant']['name']}")
+    print("Running across all days and official run-times")
     print("=" * 60)
 
     results, raw_signals_cache, details = backtester.run(dataframe)
@@ -83,12 +94,14 @@ def main():
     print(f"\nCurrent settings average deviation %  : {current_deviation:.2f}")
     print(f"Best tuned average deviation %        : {best['avg_deviation_pct']:.2f}")
 
-    results_path = Path("outputs/reports/backtest_results.csv")
+    # Per-plant reports folder - three plants' backtests must not
+    # overwrite each other.
+    results_path = reports_path("backtest_results.csv")
     results_path.parent.mkdir(parents=True, exist_ok=True)
     results.to_csv(results_path, index=False)
     print(f"\nBacktest results saved to {results_path} (used by the web dashboard's history view)")
 
-    detail_path = Path("outputs/reports/backtest_detail.csv")
+    detail_path = reports_path("backtest_detail.csv")
     details.to_csv(detail_path, index=False)
     print(f"Per-block detail saved to {detail_path} (used by the dashboard's comparison view)")
 

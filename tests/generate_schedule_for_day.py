@@ -8,8 +8,8 @@ Workflow for Model Evaluation": ONE complete reconstructed
 day schedule, built exactly as it would have been published
 in real time, then compared against actual meter data.
 
-For each of the 7 scheduling times the model is given only
-what existed at that instant:
+For each scheduling time the model is given only what
+existed at that instant:
   * the Windy clip STORED for that time (local capture or
     the S3 feed; none = that run honestly runs no-vision),
   * meter data up to block T only - no lookahead,
@@ -18,6 +18,28 @@ what existed at that instant:
 It then schedules from block T to the end of the day, and
 only the blocks still in the FUTURE are rewritten - blocks
 already passed keep the value an earlier run gave them.
+
+EFFECTIVE TIME (2026-08-08)
+---------------------------
+A run does not take effect the moment it is generated. The
+mentor's "Effective Time Schedule Guide" freezes the next few
+blocks at whatever the previous schedule said, because they
+are already declared to the grid operator - 3 blocks for
+Kasipet and Bhupalpally, and (once agreed) 6 for Sirmour.
+That is why the same day, run through this same script, comes
+out DIFFERENT for the three plants: they revise at different
+speeds. The freeze is per-plant configuration
+(schedule_rules.freeze_blocks), and the run log records which
+blocks each run was actually allowed to change.
+
+MULTI-PLANT
+-----------
+Everything - the run times, the capacity, the meter folder,
+the output folder, the freeze horizon - comes from the plant
+SOLAR_PLANT names, so the three plants' reports are built by
+the same script into three separate folders:
+
+    SOLAR_PLANT=kasipet python -m tests.generate_schedule_for_day 2026-08-06
 
 The result is a block-by-block schedule showing which run
 is responsible for every block, scored against real measured
@@ -38,6 +60,7 @@ from modules.forecasting.case_based_correction import CaseBasedCorrector
 from modules.forecasting.predictor import HybridPredictor
 from modules.fusion.fusion import FeatureFusion
 from modules.preprocessing.preprocess import DataPreprocessor
+from modules.scheduling.effective_time import effective_start, freeze_window
 from modules.evaluation import metrics
 from tests.test_schedule_reconstruction import find_video_for, vision_features_for
 
@@ -45,6 +68,12 @@ from tests.test_schedule_reconstruction import find_video_for, vision_features_f
 CAPACITY_KW = settings["plant"]["capacity_mw"] * 1000
 RUN_TIMES = settings["forecast"]["run_times"]
 PLANT_NAME = settings["plant"]["name"]
+PLANT_KEY = settings["plant"]["key"]
+
+INTERVAL_MINUTES = settings["forecast"]["interval_minutes"]
+FREEZE_BLOCKS = settings.get("schedule_rules", {}).get("freeze_blocks", 0)
+
+OUT_DIR = Path(settings["outputs"]["schedules"])
 
 DEFAULT_DAY = "2026-07-25"
 
@@ -62,12 +91,10 @@ def load_data():
 
     pre = DataPreprocessor()
 
+    # Columns come from this plant's declared data_schema, so the same
+    # loader reads Sirmour's vendor format and Telangana's.
     frames = [
-        pre.preprocess(
-            file_path=path,
-            required_columns=["TimeStamp"],
-            timestamp_column="TimeStamp",
-        )
+        pre.preprocess(file_path=path)
         for path in sorted(Path(settings["paths"]["historical_data"]).glob("*.csv"))
     ]
 
@@ -76,8 +103,20 @@ def load_data():
 
 def build_schedule(data, day, provider):
     """
-    Walks the 7 scheduling times in order, rewriting only future
-    blocks.
+    Walks this plant's scheduling times in order, rewriting only the
+    blocks it is allowed to.
+
+    "Allowed to" is two rules together:
+      * the workflow document's rule - never rewrite a block that has
+        already passed;
+      * the effective-time rule - do not rewrite a block inside the
+        freeze horizon EITHER, unless no previous run ever gave it a
+        value. That exception is the guide's own ("if this is the
+        first schedule of the day and no previous schedule exists,
+        there may be nothing to freeze"), and without it the day
+        would have holes: with a 3-block freeze the 06:45 run would
+        stop at block 31 while the 08:15 run starts at 37, leaving
+        32-36 scheduled by nobody.
 
     Returns three things:
       * the FINAL schedule - every block carrying the run that last
@@ -86,9 +125,10 @@ def build_schedule(data, day, provider):
       * every INDIVIDUAL run's own complete schedule from its block T
         to the end of the day. The workflow document asks for a
         schedule to be generated at each scheduling time, so those
-        seven schedules are deliverables in their own right, not just
+        schedules are deliverables in their own right, not just
         intermediate state - they show the forecast being revised as
-        the day reveals itself.
+        the day reveals itself. These are the run's RAW output,
+        before the freeze is applied, so the two can be compared.
     """
 
     predictor = HybridPredictor()
@@ -131,31 +171,55 @@ def build_schedule(data, day, provider):
         if block_bias.available:
             forecast = block_bias.apply(forecast)
 
+        # The first block this run may change. With freeze_blocks 0 or
+        # 1 this is just run_time + one block, i.e. the original rule.
+        starts_at = effective_start(run_time, FREEZE_BLOCKS, INTERVAL_MINUTES)
+
+        first_frozen, last_frozen, effective_block = freeze_window(
+            run_time, FREEZE_BLOCKS, INTERVAL_MINUTES
+        )
+
         written = 0
+        held = 0
+
         for timestamp, value in zip(forecast["timestamp"], forecast["final_forecast_kw"]):
-            if timestamp > run_time:
 
-                # This run's own schedule for every remaining block -
-                # kept before the merge overwrites anything.
-                per_run.append({
-                    "scheduling_time": run_str,
-                    "timestamp": timestamp,
-                    "scheduled_mw": round(float(value) / 1000, 4),
-                })
+            if timestamp <= run_time:
+                continue
 
-                schedule[timestamp] = {
-                    "scheduled_kw": float(value),
-                    "scheduled_at": run_str,
-                    "windy_video": video.name if video is not None else "(none)",
-                    "vision_used": features is not None,
-                }
-                written += 1
+            # This run's own raw schedule for every remaining block,
+            # recorded before the freeze decides what may be published.
+            per_run.append({
+                "scheduling_time": run_str,
+                "timestamp": timestamp,
+                "scheduled_mw": round(float(value) / 1000, 4),
+            })
+
+            # Inside the freeze horizon AND already scheduled by an
+            # earlier run: the declared value stands.
+            if timestamp < starts_at and timestamp in schedule:
+                held += 1
+                continue
+
+            schedule[timestamp] = {
+                "scheduled_kw": float(value),
+                "scheduled_at": run_str,
+                "windy_video": video.name if video is not None else "(none)",
+                "vision_used": features is not None,
+            }
+            written += 1
 
         run_log.append({
             "scheduling_time": run_str,
+            "engine_block": block_number(run_time),
+            "frozen_blocks": (
+                f"{first_frozen}-{last_frozen}" if first_frozen else "(none)"
+            ),
+            "effective_from_block": effective_block,
             "windy_video_used": video.name if video is not None else "(none available)",
             "vision_signal": "yes" if features is not None else "no",
             "blocks_written": written,
+            "blocks_held_frozen": held,
             "weather_bias_factor": round(signals.get("weather_bias_factor", 1.0), 3),
             "block_bias_days": len(block_bias.days_used) if block_bias.available else 0,
         })
@@ -168,14 +232,24 @@ def build_schedule(data, day, provider):
     return pd.DataFrame(rows), pd.DataFrame(run_log), pd.DataFrame(per_run)
 
 
-def main():
+def main(day_str=None, data=None):
+    """
+    `day_str` and `data` are optional so a caller can reconstruct many
+    days without re-reading and re-preprocessing the whole meter
+    history once per day - see tests/backfill_day_schedules.py, which
+    backfills 37 days per plant. Called with no arguments this behaves
+    exactly as it always did, reading the day from the command line.
+    """
 
-    day_str = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_DAY
+    if day_str is None:
+        day_str = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_DAY
+
     day = pd.Timestamp(day_str).date()
 
     provider = settings["vision"].get("provider", "gemini")
 
-    data = load_data()
+    if data is None:
+        data = load_data()
 
     schedule, run_log, per_run = build_schedule(data, day, provider)
 
@@ -217,7 +291,9 @@ def main():
     # ---- scoring: real measured blocks only ----
     scored = report[report["actual_is_real"] & report["actual_mw"].notna()]
 
-    out_dir = Path("outputs/schedules")
+    # Per-plant, from config - so three plants' reconstructions of the
+    # same day never overwrite one another.
+    out_dir = OUT_DIR
     out_dir.mkdir(parents=True, exist_ok=True)
 
     schedule_path = out_dir / f"day_schedule_{day}.csv"
@@ -276,6 +352,13 @@ def main():
     print("Built per 'Schedule Generation Workflow for Model Evaluation':")
     print("each scheduling time uses only the Windy clip stored at that time and")
     print("meter data up to block T; only future blocks are rewritten.")
+    if FREEZE_BLOCKS > 1:
+        print(f"Effective time: {FREEZE_BLOCKS} blocks "
+              f"({FREEZE_BLOCKS * INTERVAL_MINUTES} min) stay frozen at the "
+              "previous schedule after each run.")
+    else:
+        print("Effective time: no freeze horizon configured for this plant - "
+              "each run takes effect immediately.")
     print()
 
     print("HOW THE DAY WAS BUILT")
@@ -337,6 +420,9 @@ def main():
         {"metric": "Plant capacity (MW)", "value": capacity_mw},
         {"metric": "Schedule date", "value": str(day)},
         {"metric": "Scheduling times", "value": ", ".join(RUN_TIMES)},
+        {"metric": "Effective time - blocks frozen per run", "value": FREEZE_BLOCKS},
+        {"metric": "Effective time - minutes frozen per run",
+         "value": FREEZE_BLOCKS * INTERVAL_MINUTES},
         {"metric": "Windy clips available", "value":
             f"{int((run_log['vision_signal'] == 'yes').sum())} of {len(RUN_TIMES)}"},
         {"metric": "Blocks scheduled", "value": len(report)},

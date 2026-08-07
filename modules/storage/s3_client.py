@@ -13,9 +13,16 @@ automatically, so no secret ever appears in code or config.
 Bucket data-lake layout :
     inputs/<state>/<site>/<YYYY-MM-DD>/<DataType>/<file>
     e.g. inputs/MadhyaPradesh/SIRMOUR/2026-07-15/Metered_Data/2026_07_15_SOLAR_INV.csv
+         inputs/Telangana/KASIPET/2026-08-06/Metered_Data/kasipet_20260806.csv
+
+All three plants share ONE bucket and one AWS account, by request.
+They are kept apart purely by prefix - each plant's overlay in
+config/plants/ sets its own site_prefix, video_prefix and
+output_prefix, so nothing this client does can reach another plant's
+data.
 
 This writes its forecast outputs back under
-    outputs/team2/SIRMOUR/...
+    outputs/team2/<SITE>/...
 =========================================================
 """
 
@@ -30,13 +37,21 @@ from config.config import settings
 from utils.logger import get_logger
 
 
-# Windy video filenames come in two formats:
-#   current  : sirmour_YYMMDD_HH_MM.<ext>       e.g. sirmour_260721_12_57.mp4
-#   older     : ..._SIRMOUR_satellite_YYYY-MM-DD_HH-MM-SS_clean.mp4 (Jul 14-15)
-_VIDEO_TIME_PATTERN = re.compile(r"sirmour_(\d{2})(\d{2})(\d{2})_(\d{2})_(\d{2})")
-_VIDEO_TIME_PATTERN_OLD = re.compile(
+# Windy clip filenames, current format, written by
+# modules/capture/windy_capture.py name_stem:
+#     <PLANT>_YYYY-MM-DD_HH-MM-SS.<ext>
+# The time is parsed from the date part alone, so this pattern is
+# plant-agnostic and works for all three sites unchanged.
+_VIDEO_TIME_PATTERN_DATED = re.compile(
     r"(\d{4})-(\d{2})-(\d{2})_(\d{2})-(\d{2})-(\d{2})"
 )
+
+# Legacy Sirmour-only format from before the 2026-07-24 rename:
+#     sirmour_YYMMDD_HH_MM.<ext>    e.g. sirmour_260721_12_57.mp4
+# Old clips with this name are still in the bucket, so it is still
+# tried. Built from the plant code so a future plant that ever used
+# the same convention would work too.
+_LEGACY_TIME_PATTERN_TEMPLATE = r"{code}_(\d{{2}})(\d{{2}})(\d{{2}})_(\d{{2}})_(\d{{2}})"
 
 _VIDEO_EXTENSIONS = (".mp4", ".webm")
 
@@ -56,6 +71,18 @@ class S3Storage:
         self.video_prefix = store.get("video_prefix", "").rstrip("/")
         self.video_cache = store.get("video_cache", "data/windy/s3_cache")
         self.output_prefix = store.get("output_prefix", "").rstrip("/")
+
+        # This plant's clip filename tag - SIRMOUR / KASIPET /
+        # BHUPALPALLY. Used to recognise our own uploads in the shared
+        # video folder and to parse the legacy filename format.
+        self.plant_code = settings.get("plant", {}).get("code", "SIRMOUR")
+
+        self.legacy_time_pattern = re.compile(
+            _LEGACY_TIME_PATTERN_TEMPLATE.format(
+                code=re.escape(self.plant_code)
+            ),
+            re.IGNORECASE,
+        )
 
         self._client = None
 
@@ -258,7 +285,7 @@ class S3Storage:
 
     # --------------------------------------------------
 
-    def sweep_junk_videos(self, date_str, own_prefix="SIRMOUR_"):
+    def sweep_junk_videos(self, date_str, own_prefix=None):
         """
         End-of-upload hygiene for one day's video folder, run after
         each capture (the user asked for junk to be checked and
@@ -273,6 +300,8 @@ class S3Storage:
 
         Never raises - hygiene must not fail a capture run.
         """
+
+        own_prefix = own_prefix or f"{self.plant_code}_"
 
         try:
             prefix = f"{self.video_prefix}/{date_str}"
@@ -309,26 +338,30 @@ class S3Storage:
 
     # --------------------------------------------------
 
-    @staticmethod
-    def parse_video_time(key):
+    def parse_video_time(self, key):
         """
-        Recording datetime encoded in a Windy video filename,
-        or None if it matches neither known pattern.
+        Recording datetime encoded in a Windy clip filename, or None
+        if it matches neither known pattern.
+
+        The current format (<PLANT>_YYYY-MM-DD_HH-MM-SS) is tried
+        first and is plant-agnostic; the legacy lowercase format is
+        matched against THIS plant's code only, so one plant can
+        never claim another's clip out of the shared bucket.
         """
 
-        match = _VIDEO_TIME_PATTERN.search(key)
-        if match:
-            yy, mm, dd, hh, minute = map(int, match.groups())
-            try:
-                return datetime(2000 + yy, mm, dd, hh, minute)
-            except ValueError:
-                return None
-
-        match = _VIDEO_TIME_PATTERN_OLD.search(key)
+        match = _VIDEO_TIME_PATTERN_DATED.search(key)
         if match:
             yyyy, mm, dd, hh, minute, ss = map(int, match.groups())
             try:
                 return datetime(yyyy, mm, dd, hh, minute, ss)
+            except ValueError:
+                return None
+
+        match = self.legacy_time_pattern.search(key)
+        if match:
+            yy, mm, dd, hh, minute = map(int, match.groups())
+            try:
+                return datetime(2000 + yy, mm, dd, hh, minute)
             except ValueError:
                 return None
 

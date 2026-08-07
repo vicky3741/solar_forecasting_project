@@ -28,6 +28,7 @@ import pandas as pd
 from config.config import settings
 from modules.evaluation.backtester import Backtester
 from modules.evaluation import metrics
+from utils.file_manager import processed_data_path
 
 
 CAPACITY_KW = settings["plant"]["capacity_mw"] * 1000
@@ -56,7 +57,7 @@ def avg_deviation_at_weight(backtester, cache, weather_weight, days=None):
 
 def main():
 
-    df = pd.read_csv("data/processed/processed_data.csv", parse_dates=["timestamp"])
+    df = pd.read_csv(processed_data_path(), parse_dates=["timestamp"])
 
     backtester = Backtester()
 

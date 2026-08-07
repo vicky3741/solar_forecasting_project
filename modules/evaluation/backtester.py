@@ -42,7 +42,9 @@ class Backtester:
         self.official_run_times = settings["forecast"]["run_times"]
 
         self.windy_folder = Path(settings["paths"]["windy_data"]) / "videos"
-        self.vision_output_folder = "outputs/extracted_frames"
+        self.vision_output_folder = settings["outputs"].get(
+            "extracted_frames", "outputs/extracted_frames"
+        )
 
     # --------------------------------------------------
 

@@ -2,12 +2,29 @@
 # Solar Forecasting Project
 # Global Configuration File
 # ============================================================
+# THIS FILE IS THE BASE LAYER AND IT DESCRIBES SIRMOUR.
+#
+# Since 2026-08-08 the codebase also schedules Kasipet and
+# Bhupalpally. Those two do NOT edit anything here - they carry
+# their own overlay in config/plants/<key>.yaml, which is deep-
+# merged over this file when SOLAR_PLANT names them (see
+# config/config.py). Keeping Sirmour as the untouched base is
+# what guarantees the live Sirmour automation behaves exactly as
+# it did before the other plants existed.
+#
+# So: when you add a knob that differs per plant, give it
+# SIRMOUR'S CURRENT BEHAVIOUR as the default here, and override
+# it in the new plants' overlays.
+# ============================================================
 
 project:
   name: Solar Forecasting Project
   version: 1.0.0
 
 plant:
+  key: sirmour            # overlay file name / SOLAR_PLANT value; also set by config.py
+  code: SIRMOUR           # S3 site folder and Windy clip filename tag - must match the bucket layout
+  state: MadhyaPradesh    # S3 <state> path segment
   name: Sirmour Solar Plant
   latitude: 24.56253056
   longitude: 75.09140278
@@ -22,6 +39,49 @@ forecast:
   forecast_end_time: "19:00"
   output_frequency: 15
   run_times: ["06:45", "08:15", "09:45", "11:15", "12:45", "14:15", "15:45"]
+
+# How this plant's meter CSVs are shaped. Sirmour's vendor writes
+# "TimeStamp,Active Power (kW),POA (W/m2),GHI (W/m2),..." with ISO
+# timestamps; the Telangana plants' vendor writes a different header
+# and dd-mm-yyyy dates, so each plant declares its own schema instead
+# of the preprocessor guessing.
+data_schema:
+  timestamp_column: TimeStamp
+  dayfirst: false          # true for dd-mm-yyyy files (see the Telangana overlays)
+  # Renames applied AFTER the standard lower_snake_case pass, so the
+  # rest of the pipeline always sees active_power_kw / ghi_w_m2 / etc.
+  # whatever the vendor called them. Empty = the columns already match.
+  column_map: {}
+  # Some vendors stamp a block with its END time. Ours do not: the
+  # clear-sky alignment test (scratch check 2026-08-08) put all three
+  # plants' irradiance peak and morning/afternoon symmetry at shift 0,
+  # so no shift is applied. Kept configurable because getting this
+  # wrong costs a silent 15-minute lag across the whole model.
+  timestamp_shift_minutes: 0
+
+# The mentor's "Effective Time Schedule Guide" (2026-08-08): a newly
+# generated schedule does not take effect immediately - the next few
+# blocks stay frozen at whatever the PREVIOUS schedule said, because
+# they are already committed to the grid operator.
+schedule_rules:
+  # Blocks to keep frozen from the previous schedule, counted from the
+  # engine block (the block the run fires in) inclusive. The guide sets
+  # Sirmour to 6 blocks / 90 min and Kasipet-Kothagudem to 3 / 45 min.
+  #
+  # KEPT AT 0 FOR SIRMOUR ON PURPOSE. Sirmour has been publishing with
+  # no freeze horizon since the pipeline was built, every tuned constant
+  # in this file was validated against that behaviour, and the user's
+  # instruction with the new plants was explicitly not to disturb the
+  # running Sirmour automation. Raise this to 6 (one line) once the
+  # change has been agreed and re-backtested - the machinery is built
+  # and already live on the other two plants.
+  freeze_blocks: 0
+
+# Enercast is a reference schedule shown side by side, never a training
+# input (mentor brief). Only Sirmour has an Enercast feed.
+enercast:
+  enabled: true
+  filename_prefix: Sirmour   # data/enercast/<prefix>_<day><month>_enercast.csv
 
 vision:
   # Which LLM reads the Windy cloud frames. The two are fully
@@ -304,6 +364,7 @@ outputs:
   schedules: outputs/schedules
   reports: outputs/reports
   json: outputs/json
+  extracted_frames: outputs/extracted_frames   # per-plant: three captures fire at the same minute
 
 # Team-shared AWS S3 cloud storage (set up by Team 3). Only the
 # bucket/region/paths (non-secret) live here; the access keys are
@@ -325,6 +386,23 @@ storage:
   auto_pull: true    # orchestrator pulls the latest meter data + same-day Windy video from S3 before forecasting
   auto_push: true    # orchestrator pushes the forecast + current schedule back to S3 after
 
+# The long-running automation process. One of these runs per plant, so
+# each needs its OWN single-instance lock port - they are three separate
+# services that must never mistake each other for a duplicate of
+# themselves and refuse to start.
+scheduler:
+  forecast_timeout_seconds: 600
+  single_instance_port: 49732
+  # Seconds to delay this plant's trigger after its official run time,
+  # so three plants sharing the same run times do not all load Chronos
+  # at once on a ~900 MB EC2 box (one forecast peaks near 450 MB).
+  # The forecast itself still floors to the 15-minute block, so a delay
+  # of a few minutes changes which second the work starts and nothing
+  # else - the schedule is still the 06:45 schedule.
+  # Sirmour keeps 0: it was here first and its timings do not move.
+  run_offset_seconds: 0
+
 logging:
   level: INFO
   log_directory: logs
+  log_file: solar_forecasting.log   # per-plant, so three services never interleave into one file

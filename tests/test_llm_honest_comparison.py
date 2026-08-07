@@ -34,6 +34,7 @@ from modules.forecasting.predictor import HybridPredictor
 from modules.fusion.fusion import FeatureFusion
 from modules.evaluation import metrics
 from modules.storage.s3_client import S3Storage
+from utils.file_manager import processed_data_path
 
 
 CAPACITY_KW = settings["plant"]["capacity_mw"] * 1000
@@ -96,7 +97,7 @@ def score_run(predictor, fusion, dataframe, run_time, vision_features, actual):
 def main():
 
     processed = pd.read_csv(
-        "data/processed/processed_data.csv", parse_dates=["timestamp"]
+        processed_data_path(), parse_dates=["timestamp"]
     )
 
     actual_columns = ["timestamp", "active_power_kw"]
@@ -128,9 +129,15 @@ def main():
 
     rows = []
 
+    # parse_video_time became an instance method when the bucket started
+    # holding three plants' clips - the legacy filename pattern is now
+    # built from the configured plant code, so one plant cannot claim
+    # another's file.
+    storage = S3Storage()
+
     for video in gemini_dir_videos:
 
-        video_time = S3Storage.parse_video_time(video.name)
+        video_time = storage.parse_video_time(video.name)
         run_time = pd.Timestamp(video_time)
 
         gemini_features = load_cached_vision("gemini", video.name)

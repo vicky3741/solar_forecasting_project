@@ -18,6 +18,20 @@ schedule does not (before the first scheduling run) are
 left blank rather than dropped, so the two files line up
 row for row and can be pasted side by side.
 
+MULTI-PLANT (2026-08-08)
+------------------------
+This is the report the mentor reads, and it is built the
+same way for all three plants - but into three separate
+folders, from three separate schedules, against three
+separate meter feeds. Which one you get is decided by
+SOLAR_PLANT:
+
+    SOLAR_PLANT=kasipet python -m tests.build_simple_schedule 2026-08-06
+
+The Enercast columns only appear for plants that have an
+Enercast feed (Sirmour), so the Telangana reports are not
+padded with an empty column that looks like missing data.
+
 Run:  python -m tests.build_simple_schedule [YYYY-MM-DD]
 =========================================================
 """
@@ -35,14 +49,18 @@ from openpyxl.utils import get_column_letter
 from config.config import settings
 from modules.preprocessing.preprocess import DataPreprocessor
 from modules.evaluation.evaluator import Evaluator
+from utils.file_manager import find_daily_file
 
 
 DAY = sys.argv[1] if len(sys.argv) > 1 else "2026-07-25"
-SRC = Path("outputs/schedules")
-OUT_DIR = Path("outputs/reports")
+SRC = Path(settings["outputs"]["schedules"])
+OUT_DIR = Path(settings["outputs"]["reports"])
 
 CAPACITY_KW = settings["plant"]["capacity_mw"] * 1000
 PLANT = settings["plant"]["name"]
+
+FREEZE_BLOCKS = settings.get("schedule_rules", {}).get("freeze_blocks", 0)
+INTERVAL_MINUTES = settings["forecast"]["interval_minutes"]
 
 FONT = "Arial"
 NAVY = "1F3864"
@@ -52,13 +70,20 @@ GREY = "F2F2F2"
 def load_actual(day):
     """The day's meter readings, straight from the raw file."""
 
-    path = Path(settings["paths"]["historical_data"]) / f"{day.replace('-', '_')}_SOLAR_INV.csv"
+    folder = Path(settings["paths"]["historical_data"])
 
-    frame = DataPreprocessor().preprocess(
-        file_path=path,
-        required_columns=["TimeStamp"],
-        timestamp_column="TimeStamp",
-    )
+    # Found by the date in the filename, not a fixed template: Sirmour's
+    # vendor writes 2026_08_06_SOLAR_INV.csv and Telangana's writes
+    # kasipet_20260806.csv.
+    path = find_daily_file(folder, day)
+
+    if path is None:
+        raise FileNotFoundError(
+            f"No meter file for {day} in {folder} - ingest it first with "
+            "python -m tests.ingest_plant_history"
+        )
+
+    frame = DataPreprocessor().preprocess(file_path=path)
 
     columns = ["timestamp", "active_power_kw"]
     if "is_real_measurement" in frame.columns:
@@ -137,9 +162,19 @@ def main():
     fill_head = PatternFill("solid", fgColor=NAVY)
     fill_grey = PatternFill("solid", fgColor=GREY)
 
+    # The effective-time rule belongs in the header: it is the reason
+    # the same day's report looks different for the three plants, and
+    # anyone comparing them needs to see it without opening the config.
+    effective_note = (
+        f"effective time {FREEZE_BLOCKS} blocks "
+        f"/ {FREEZE_BLOCKS * INTERVAL_MINUTES} min"
+        if FREEZE_BLOCKS > 1
+        else "no freeze horizon"
+    )
+
     ws.cell(row=1, column=1,
             value=f"{PLANT} - Scheduled vs Actual - {DAY}  "
-                  f"(15-minute blocks, all values in MW)"
+                  f"(15-minute blocks, all values in MW, {effective_note})"
             ).font = Font(name=FONT, size=12, bold=True, color=NAVY)
 
     if has_enercast:

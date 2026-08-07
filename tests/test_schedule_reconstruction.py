@@ -45,12 +45,20 @@ from modules.fusion.fusion import FeatureFusion
 from modules.vision.vision_module import VisionModule
 from modules.storage.s3_client import S3Storage
 from modules.evaluation import metrics
+from utils.file_manager import processed_data_path
 
 
 CAPACITY_KW = settings["plant"]["capacity_mw"] * 1000
 RUN_TIMES = settings["forecast"]["run_times"]
 
 VIDEO_DIR = Path(settings["windy_capture"]["video_dir"])
+
+# Deliberately NOT plant-scoped. The cache is keyed by video filename,
+# and every clip is already stamped with its plant
+# (SIRMOUR_2026-08-06_11-15-00 vs KASIPET_...), so three plants cannot
+# collide here. Splitting it per plant would orphan Sirmour's existing
+# cached readings and re-spend the free-tier Gemini quota re-analysing
+# clips that have already been read.
 CACHE_ROOT = Path("outputs/llm_compare")
 
 # The mentor's document treats the clip STORED IN S3 at each scheduling
@@ -257,7 +265,7 @@ def score_schedule(final, actual):
 def main():
 
     processed = pd.read_csv(
-        "data/processed/processed_data.csv", parse_dates=["timestamp"]
+        processed_data_path(), parse_dates=["timestamp"]
     )
 
     actual_columns = ["timestamp", "active_power_kw"]

@@ -5,9 +5,16 @@ Windy Video Capture
 =========================================================
 Records the Windy satellite-view animation for the plant
 location using a headless browser (Playwright), saves it
-locally under the SIRMOUR_YYYY-MM-DD_HH-MM-SS convention
+locally under the <PLANT>_YYYY-MM-DD_HH-MM-SS convention
 (see name_stem) and uploads it to the team S3 bucket so the
 forecast can pull it back down.
+
+Which plant it records is decided entirely by SOLAR_PLANT
+(see config/config.py): the coordinates, the local video
+folder, the S3 video prefix, the filename tag and the Windy
+API key all come from that plant's configuration. Three
+independent capture processes therefore run from this one
+file without ever touching each other's clips.
 
 RELIABILITY NOTES - this module previously failed when run
 by Windows Task Scheduler ("BrowserType.launch: Executable
@@ -73,6 +80,10 @@ class WindyCapture:
 
         self.lat = plant["latitude"]
         self.lon = plant["longitude"]
+
+        # Plant tag matching the S3 site convention
+        # (inputs/.../SIRMOUR, inputs/.../KASIPET, ...).
+        self.plant_tag = plant.get("code", "SIRMOUR")
 
         self.api_key = capture.get("api_key")
         self.zoom = capture.get("zoom", 8)
@@ -177,18 +188,19 @@ class WindyCapture:
         "--no-sandbox",
     ]
 
-    # Plant tag matching the S3 site convention (inputs/.../SIRMOUR).
-    PLANT_TAG = "SIRMOUR"
-
     def name_stem(self, run_time):
         """
         Shared, human-readable basename for every artifact of one
         capture: PLANT_YYYY-MM-DD_HH-MM-SS. Unambiguous about the
         exact date and time, and still parseable by S3Storage's
         date-time regex so the forecast can locate the clip.
+
+        The plant tag comes from config (plant.code) rather than a
+        constant, so each site's clips are self-identifying even
+        though all three land in one bucket.
         """
 
-        return f"{self.PLANT_TAG}_{run_time.strftime('%Y-%m-%d_%H-%M-%S')}"
+        return f"{self.plant_tag}_{run_time.strftime('%Y-%m-%d_%H-%M-%S')}"
 
     def output_filename(self, run_time):
 

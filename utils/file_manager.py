@@ -4,20 +4,100 @@ Solar Forecasting Project
 File Manager
 =========================================================
 Generic save/load/append helpers for the CSV and JSON
-output files the orchestrator produces. Pure I/O - no
-forecasting or scheduling logic lives here.
+output files the orchestrator produces, plus the handful of
+path lookups that must resolve per plant. No forecasting or
+scheduling logic lives here.
 =========================================================
 """
 
 import json
+import re
 from pathlib import Path
 
 import pandas as pd
+
+from config.config import settings
+
+
+# --------------------------------------------------
+
+def processed_data_path():
+    """
+    This plant's combined processed dataset - the file
+    tests/test_preprocessing.py writes and every backtest and
+    tuning experiment reads.
+
+    Resolved through config rather than hard-coded, because the
+    string "data/processed/processed_data.csv" appeared in a dozen
+    scripts: with three plants in the codebase, each of those would
+    otherwise silently read SIRMOUR's data no matter which plant it
+    was asked to analyse, and produce a plausible-looking wrong
+    answer instead of an error.
+    """
+
+    return Path(settings["paths"]["processed_data"]) / "processed_data.csv"
+
+
+def reports_path(*parts):
+    """
+    A file inside this plant's reports folder.
+    """
+
+    return Path(settings["outputs"]["reports"]).joinpath(*parts)
 
 
 def ensure_parent(path):
 
     Path(path).parent.mkdir(parents=True, exist_ok=True)
+
+
+# --------------------------------------------------
+
+# A calendar date anywhere in a filename, in any of the separators the
+# three plants' vendors use: 2026_08_06_SOLAR_INV.csv (Sirmour),
+# kasipet_20260806.csv and bhupalpally_20260806.csv (Telangana).
+_FILENAME_DATE = re.compile(r"(\d{4})[-_]?(\d{2})[-_]?(\d{2})")
+
+
+def date_in_name(name):
+    """
+    The calendar date encoded in a filename, or None.
+    """
+
+    match = _FILENAME_DATE.search(str(name))
+
+    if not match:
+        return None
+
+    try:
+        return pd.Timestamp(
+            year=int(match.group(1)),
+            month=int(match.group(2)),
+            day=int(match.group(3)),
+        ).date()
+    except ValueError:
+        return None
+
+
+def find_daily_file(folder, day, extension="*.csv"):
+    """
+    The meter file for one calendar day inside a plant's historical
+    folder, found by the date in its NAME rather than by a fixed
+    naming template.
+
+    Each plant's vendor names its daily export differently
+    (2026_08_06_SOLAR_INV.csv vs kasipet_20260806.csv), and hard-coding
+    one template is what would otherwise have to be duplicated into
+    every report script. Returns None when that day is not present.
+    """
+
+    day = pd.Timestamp(day).date()
+
+    for path in sorted(Path(folder).glob(extension)):
+        if date_in_name(path.name) == day:
+            return path
+
+    return None
 
 
 # --------------------------------------------------

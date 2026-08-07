@@ -37,6 +37,7 @@ from modules.forecasting.residual_correction import (
 )
 from modules.evaluation import metrics
 from tests.test_residual_experiment import compute_kt_now_lookup
+from utils.file_manager import processed_data_path
 
 
 CAPACITY_KW = settings["plant"]["capacity_mw"] * 1000
@@ -52,7 +53,7 @@ def main():
     )
 
     processed = pd.read_csv(
-        "data/processed/processed_data.csv",
+        processed_data_path(),
         parse_dates=["timestamp"]
     )
 

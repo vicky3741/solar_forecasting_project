@@ -50,6 +50,7 @@ from openpyxl.utils import get_column_letter
 from config.config import settings
 from modules.evaluation.evaluator import Evaluator
 from modules.preprocessing.preprocess import DataPreprocessor
+from utils.file_manager import find_daily_file
 
 def parse_args():
     """
@@ -66,7 +67,7 @@ def parse_args():
     parser.add_argument(
         "--from-xlsx", dest="from_xlsx", default=None,
         help="read the AI Schedule from this report-format xlsx instead of "
-             "outputs/schedules/day_schedule_<day>.csv",
+             "this plant's day_schedule_<day>.csv",
     )
     parser.add_argument(
         "--tag", default="",
@@ -78,8 +79,12 @@ def parse_args():
 
 ARGS = parse_args()
 DAY = ARGS.day
-SCHEDULE_DIR = Path("outputs/schedules")
-OUT_DIR = Path("outputs/reports")
+
+# Per-plant, from config: the three plants' penalty reports for the same
+# day are three different documents (different capacity, different
+# freeze horizon, different meter feed) and must not collide.
+SCHEDULE_DIR = Path(settings["outputs"]["schedules"])
+OUT_DIR = Path(settings["outputs"]["reports"])
 
 CAPACITY_MW = settings["plant"]["capacity_mw"]
 PLANT = settings["plant"]["name"]
@@ -110,13 +115,19 @@ def block_number(timestamp):
 def load_full_day_actual(day):
     """Every meter reading for the day, not just the scored blocks."""
 
-    path = Path(settings["paths"]["historical_data"]) / f"{day.replace('-', '_')}_SOLAR_INV.csv"
+    folder = Path(settings["paths"]["historical_data"])
 
-    frame = DataPreprocessor().preprocess(
-        file_path=path,
-        required_columns=["TimeStamp"],
-        timestamp_column="TimeStamp",
-    )
+    # Located by the date in the filename rather than a fixed template -
+    # each plant's vendor names its daily export differently.
+    path = find_daily_file(folder, day)
+
+    if path is None:
+        raise FileNotFoundError(
+            f"No meter file for {day} in {folder} - ingest it first with "
+            "python -m tests.ingest_plant_history"
+        )
+
+    frame = DataPreprocessor().preprocess(file_path=path)
 
     columns = ["timestamp", "active_power_kw"]
     if "is_real_measurement" in frame.columns:

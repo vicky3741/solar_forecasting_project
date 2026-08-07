@@ -37,6 +37,7 @@ from modules.vision.vision_module import VisionModule
 from modules.forecasting.predictor import HybridPredictor
 from modules.fusion.fusion import FeatureFusion
 from modules.evaluation import metrics
+from utils.file_manager import processed_data_path
 
 
 CAPACITY_KW = settings["plant"]["capacity_mw"] * 1000
@@ -223,7 +224,7 @@ def score_run(predictor, fusion, dataframe, run_time, vision_features, actual,
 def main():
 
     processed = pd.read_csv(
-        "data/processed/processed_data.csv", parse_dates=["timestamp"]
+        processed_data_path(), parse_dates=["timestamp"]
     )
 
     actual_columns = ["timestamp", "active_power_kw"]

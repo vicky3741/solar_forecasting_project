@@ -1,0 +1,22 @@
+# ============================================================
+# Plant overlay: SIRMOUR (Madhya Pradesh, 5.1 MW)
+# ============================================================
+# Deliberately almost empty.
+#
+# config/settings.yaml IS Sirmour - it holds every tuned constant
+# this plant has earned over the project, with the evidence for each
+# one written beside it. Restating any of that here would create a
+# second place for it to drift out of date.
+#
+# Keeping this file empty is also the guarantee the multi-plant work
+# asked for: with SOLAR_PLANT unset (or set to "sirmour"), the
+# resolved configuration is exactly what the live automation has
+# always used, so nothing done for Kasipet or Bhupalpally can reach
+# this plant.
+#
+# Put something here only if it is TRUE OF SIRMOUR ALONE and would be
+# wrong as a default for a new plant.
+# ============================================================
+
+plant:
+  key: sirmour

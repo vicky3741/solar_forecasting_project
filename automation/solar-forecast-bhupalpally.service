@@ -1,0 +1,34 @@
+[Unit]
+# Bhupalpally's scheduler. A separate unit from Sirmour's and Kasipet's
+# on purpose: the three must be startable, restartable and debuggable
+# without touching each other, and a failure on one plant must never take
+# the others down.
+Description=Solar Forecasting Scheduler - Bhupalpally (Telangana, 10 MW)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/solar_forecasting_project
+
+# THE line. Everything else about this service - which meter folder it
+# reads, which S3 prefixes it touches, which times it fires at, which log
+# it writes - follows from it via config/config.py.
+Environment=SOLAR_PLANT=bhupalpally
+Environment=PYTHONUNBUFFERED=1
+
+# NOTE ON MEMORY: all three plants share the same official run times, and
+# one forecast peaks near 450 MB (torch + Chronos weights) on a ~900 MB
+# box. The stagger that prevents three simultaneous peaks is NOT here - a
+# delayed service start would only shift boot, not the daily triggers. It
+# is scheduler.run_offset_seconds in config/plants/bhupalpally.yaml, which
+# fires this plant 10 minutes after Sirmour every run. Change it there.
+
+ExecStart=/home/ubuntu/solar_forecasting_project/.venv/bin/python -m modules.scheduler.scheduler
+
+Restart=always
+RestartSec=30
+
+[Install]
+WantedBy=multi-user.target

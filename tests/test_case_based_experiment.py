@@ -29,6 +29,7 @@ from modules.forecasting.clearsky import ClearSkyModel
 from modules.forecasting.case_based_correction import CaseBasedCorrector, FEATURES
 from modules.evaluation import metrics
 from tests.test_residual_experiment import compute_kt_now_lookup
+from utils.file_manager import processed_data_path, reports_path
 
 
 CAPACITY_KW = settings["plant"]["capacity_mw"] * 1000
@@ -36,13 +37,20 @@ CAPACITY_KW = settings["plant"]["capacity_mw"] * 1000
 
 def main():
 
-    detail = pd.read_csv(
-        "outputs/reports/backtest_detail.csv",
-        parse_dates=["timestamp"]
-    )
+    detail_path = reports_path("backtest_detail.csv")
+
+    if not detail_path.exists():
+        print(
+            f"{detail_path} does not exist yet. Build it first:\n"
+            f"    SOLAR_PLANT={settings['plant']['key']} "
+            "python -m tests.test_backtest"
+        )
+        return
+
+    detail = pd.read_csv(detail_path, parse_dates=["timestamp"])
 
     processed = pd.read_csv(
-        "data/processed/processed_data.csv",
+        processed_data_path(),
         parse_dates=["timestamp"]
     )
 
@@ -123,7 +131,7 @@ def main():
         overall_after < overall_before and days_helped > len(results) / 2
     )
 
-    output_path = Path("outputs/reports/case_based_experiment.csv")
+    output_path = reports_path("case_based_experiment.csv")
     output_path.parent.mkdir(parents=True, exist_ok=True)
     results.to_csv(output_path, index=False)
 

@@ -28,10 +28,33 @@ mid-recording (2026-07-26). Building it per run keeps this
 process near-idle for the 23 hours a day it is waiting, and
 means capture and forecast never hold their peak memory at
 the same time.
+
+ONE SCHEDULER PER PLANT (2026-08-08)
+------------------------------------
+Since Kasipet and Bhupalpally joined Sirmour, THREE of these
+run side by side - one process per plant, each started with
+its own SOLAR_PLANT (see automation/). They are genuinely
+independent:
+
+  * each holds its OWN single-instance lock port, so they
+    never mistake each other for a duplicate of themselves and
+    refuse to start (49732 / 49733 / 49734);
+  * each writes its own log file;
+  * each fires at its own plant's run times - Telangana has an
+    extra 17:15 run that Sirmour does not;
+  * each passes SOLAR_PLANT explicitly to the capture and
+    forecast subprocesses it spawns, rather than trusting the
+    inherited environment, so a launcher that sets the variable
+    in an unexpected way cannot make one plant's scheduler
+    forecast another plant.
+
+A crash, a hung capture or an exhausted API quota on one plant
+therefore stops that plant only.
 =========================================================
 """
 
 import gc
+import os
 import socket
 import subprocess
 import sys
@@ -92,6 +115,14 @@ class Scheduler:
 
         self.logger = get_logger()
 
+        self.plant_key = settings["plant"]["key"]
+        self.plant_name = settings["plant"].get("name", self.plant_key)
+
+        # Handed to every subprocess so the child resolves the SAME
+        # plant this scheduler resolved, whatever the parent's
+        # environment happens to look like.
+        self.child_env = {**os.environ, "SOLAR_PLANT": self.plant_key}
+
         self.official_run_times = settings["forecast"]["run_times"]
 
         capture_settings = settings.get("windy_capture", {})
@@ -114,6 +145,12 @@ class Scheduler:
         )
         self._lock_socket = None
 
+        # Seconds after the official run time that THIS plant actually
+        # fires. See register_jobs.
+        self.run_offset_seconds = int(
+            settings.get("scheduler", {}).get("run_offset_seconds", 0)
+        )
+
     # --------------------------------------------------
 
     def capture_video(self):
@@ -132,7 +169,8 @@ class Scheduler:
                 [sys.executable, "-m", "modules.capture.windy_capture"],
                 capture_output=True,
                 text=True,
-                timeout=self.capture_timeout
+                timeout=self.capture_timeout,
+                env=self.child_env
             )
 
             if result.returncode == 0:
@@ -171,7 +209,8 @@ class Scheduler:
                 [sys.executable, "-m", "modules.orchestrator.pipeline"],
                 capture_output=True,
                 text=True,
-                timeout=self.forecast_timeout
+                timeout=self.forecast_timeout,
+                env=self.child_env
             )
 
             if result.returncode == 0:
@@ -194,7 +233,7 @@ class Scheduler:
 
     def run_now(self):
 
-        self.logger.info("Scheduled trigger fired")
+        self.logger.info(f"Scheduled trigger fired for {self.plant_name}")
 
         # Capture first, in its own process, so Chromium has the
         # machine to itself before the forecast loads Chronos.
@@ -206,13 +245,47 @@ class Scheduler:
 
     # --------------------------------------------------
 
+    def trigger_time(self, run_time):
+        """
+        The wall-clock time this plant's job fires: its official run
+        time plus this plant's stagger offset, as HH:MM:SS.
+
+        The stagger exists because all three plants share the same
+        official run times and one forecast peaks near 450 MB on a
+        ~900 MB box - three at the same instant is what would OOM it.
+        It does NOT move the schedule: the orchestrator floors its run
+        time to the 15-minute block, so a run fired at 06:50 still
+        produces the 06:45 schedule, and the Windy clip it records
+        still falls inside the 20-minute match tolerance for that slot.
+        Offsets stay well under the 90 minutes between run times.
+        """
+
+        hour, minute = map(int, run_time.split(":"))
+
+        seconds = hour * 3600 + minute * 60 + self.run_offset_seconds
+
+        return time.strftime("%H:%M:%S", time.gmtime(seconds % 86400))
+
+    # --------------------------------------------------
+
     def register_jobs(self):
 
         for run_time in self.official_run_times:
 
-            schedule_lib.every().day.at(run_time).do(self.run_now)
+            fires_at = self.trigger_time(run_time)
 
-            self.logger.info(f"Registered daily run at {run_time}")
+            schedule_lib.every().day.at(fires_at).do(self.run_now)
+
+            if self.run_offset_seconds:
+                self.logger.info(
+                    f"Registered daily run at {run_time} for "
+                    f"{self.plant_name} (fires {fires_at}, staggered "
+                    f"{self.run_offset_seconds}s)"
+                )
+            else:
+                self.logger.info(
+                    f"Registered daily run at {run_time} for {self.plant_name}"
+                )
 
     # --------------------------------------------------
 
@@ -232,7 +305,10 @@ class Scheduler:
 
         self.register_jobs()
 
-        self.logger.info("Scheduler started - waiting for the next run time")
+        self.logger.info(
+            f"Scheduler started for {self.plant_name} "
+            f"(lock port {self.lock_port}) - waiting for the next run time"
+        )
 
         while True:
 

@@ -19,11 +19,24 @@ asks for:
 
 Live data feed: when storage.auto_pull is on, the run first
 pulls the latest meter data from the team S3 bucket into
-data/historical; when storage.auto_push is on, it pushes the
-forecast and Current Final Schedule back to the bucket after.
-Both degrade gracefully - if the cloud is unreachable the run
-continues on whatever local data exists, so a network hiccup
-never blocks a forecast.
+this plant's historical folder; when storage.auto_push is on,
+it pushes the forecast and Current Final Schedule back to the
+bucket after. Both degrade gracefully - if the cloud is
+unreachable the run continues on whatever local data exists,
+so a network hiccup never blocks a forecast.
+
+WHICH PLANT THIS RUNS FOR
+-------------------------
+Whichever one SOLAR_PLANT names (default sirmour). Nothing in
+this file names a plant: the data folders, output folders, S3
+prefixes, capacity, coordinates, run times and freeze horizon
+all arrive through `settings`, which config/config.py has
+already resolved for that plant. Running the three plants is
+therefore three processes over this one file:
+
+    SOLAR_PLANT=sirmour     python -m modules.orchestrator.pipeline
+    SOLAR_PLANT=kasipet     python -m modules.orchestrator.pipeline
+    SOLAR_PLANT=bhupalpally python -m modules.orchestrator.pipeline
 =========================================================
 """
 
@@ -40,6 +53,7 @@ from modules.forecasting.block_bias_correction import BlockBiasCorrector
 from modules.evaluation.evaluator import Evaluator
 from modules.vision.vision_module import VisionModule
 from modules.fusion.fusion import FeatureFusion
+from modules.scheduling.effective_time import apply_freeze, freeze_window
 from modules.storage.s3_client import S3Storage
 from utils import file_manager
 from utils.logger import get_logger
@@ -80,13 +94,26 @@ class Orchestrator:
         legacy_folder = Path(settings["paths"]["windy_data"]) / "videos"
 
         self.windy_folders = [capture_folder, legacy_folder]
-        self.vision_output_folder = "outputs/extracted_frames"
+        self.vision_output_folder = settings["outputs"].get(
+            "extracted_frames", "outputs/extracted_frames"
+        )
 
         self.forecasts_folder = Path(settings["outputs"]["forecasts"])
         self.schedules_folder = Path(settings["outputs"]["schedules"])
         self.reports_folder = Path(settings["outputs"]["reports"])
 
         self.official_run_times = settings["forecast"]["run_times"]
+
+        self.plant_name = settings["plant"].get("name", "plant")
+        self.interval_minutes = settings["forecast"]["interval_minutes"]
+
+        # How many blocks a newly generated schedule may NOT touch,
+        # because they are already committed to the grid operator (the
+        # mentor's Effective Time Schedule Guide). 0 = the pre-2026-08-08
+        # behaviour, where every block after the run time is rewritten.
+        self.freeze_blocks = settings.get("schedule_rules", {}).get(
+            "freeze_blocks", 0
+        )
 
     # --------------------------------------------------
 
@@ -151,12 +178,12 @@ class Orchestrator:
 
         csv_files = sorted(self.historical_folder.glob("*.csv"))
 
+        # No explicit column names here any more: each plant declares
+        # its vendor's schema under data_schema in config, and the
+        # preprocessor applies it (Sirmour's declared schema is the
+        # "TimeStamp" this used to hard-code).
         processed_days = [
-            self.preprocessor.preprocess(
-                file_path=csv_file,
-                required_columns=["TimeStamp"],
-                timestamp_column="TimeStamp"
-            )
+            self.preprocessor.preprocess(file_path=csv_file)
             for csv_file in csv_files
         ]
 
@@ -229,12 +256,44 @@ class Orchestrator:
 
     # --------------------------------------------------
 
+    def load_previous_schedule(self):
+        """
+        The Current Final Schedule as it stands before this run -
+        the standing declaration whose near-term blocks the freeze
+        horizon protects. Returns {timestamp -> kW} for its
+        forecast blocks, or {} when there is no previous schedule
+        (first run of the day, or a fresh install).
+        """
+
+        previous = file_manager.load_dataframe(
+            self.schedules_folder / "current_final_schedule.csv",
+            parse_dates=["timestamp"]
+        )
+
+        if previous is None or previous.empty:
+            return {}
+
+        if "source" in previous.columns:
+            previous = previous[previous["source"] == "forecast"]
+
+        return dict(zip(previous["timestamp"], previous["value_kw"]))
+
+    # --------------------------------------------------
+
     def build_current_schedule(self, dataframe, forecast, run_time):
         """
         Actual generation for every block already completed
         today, plus this run's forecast for every block still
         ahead - this is the mentor brief's "Current Final
         Schedule", overwritten after every run.
+
+        The forecast half is passed through this plant's freeze
+        horizon first (modules/scheduling/effective_time.py): blocks
+        inside the horizon keep the value the PREVIOUS schedule gave
+        them, because they are already declared. With
+        schedule_rules.freeze_blocks at 0 - which is what Sirmour
+        runs - this is a no-op and the schedule is built exactly as
+        it always was.
         """
 
         today = dataframe[dataframe["timestamp"].dt.date == run_time.date()]
@@ -248,6 +307,32 @@ class Orchestrator:
         future = forecast[["timestamp", "final_forecast_kw"]].rename(
             columns={"final_forecast_kw": "value_kw"}
         )
+
+        if self.freeze_blocks > 1:
+
+            published, frozen = apply_freeze(
+                new_values=dict(zip(future["timestamp"], future["value_kw"])),
+                # Read from disk here, not earlier: this is the last
+                # moment before the file is overwritten with the new
+                # schedule, so it is guaranteed to be the standing one.
+                previous_values=self.load_previous_schedule(),
+                run_time=run_time,
+                freeze_blocks=self.freeze_blocks,
+                interval_minutes=self.interval_minutes,
+            )
+
+            future["value_kw"] = future["timestamp"].map(published)
+
+            first, last, effective = freeze_window(
+                run_time, self.freeze_blocks, self.interval_minutes
+            )
+
+            self.logger.info(
+                f"Effective time: blocks {first}-{last} held at the previous "
+                f"schedule ({len(frozen)} block(s) actually frozen); this run "
+                f"takes effect from block {effective}"
+            )
+
         future["source"] = "forecast"
 
         schedule = pd.concat([past, future], ignore_index=True)
@@ -330,7 +415,9 @@ class Orchestrator:
             # block boundary and keeps every block on the grid.
             run_time = pd.Timestamp.now().floor("15min")
 
-        self.logger.info(f"Starting forecast run for {run_time}")
+        self.logger.info(
+            f"Starting forecast run for {self.plant_name} at {run_time}"
+        )
 
         self.pull_latest_from_cloud()
 
@@ -416,7 +503,9 @@ class Orchestrator:
 
         self.push_outputs_to_cloud(run_label, forecast_path, schedule_path)
 
-        self.logger.info(f"Forecast run complete for {run_time}")
+        self.logger.info(
+            f"Forecast run complete for {self.plant_name} at {run_time}"
+        )
 
         return forecast
 

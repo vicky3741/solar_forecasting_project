@@ -19,6 +19,7 @@ from config.config import settings
 from modules.evaluation import metrics
 from modules.evaluation.backtester import Backtester
 from modules.forecasting.residual_correction import (
+from utils.file_manager import processed_data_path
     FEATURES,
     NUM_BOOST_ROUND,
     TRAINING_PARAMS,
@@ -106,7 +107,7 @@ def residual_correct(train, test):
 
 
 def main():
-    processed = pd.read_csv("data/processed/processed_data.csv", parse_dates=["timestamp"])
+    processed = pd.read_csv(processed_data_path(), parse_dates=["timestamp"])
     backtester = Backtester()
 
     print("Running point-in-time signals. Historical weather uses archived single runs...")

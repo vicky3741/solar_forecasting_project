@@ -24,15 +24,31 @@ Both endpoints read from files already produced by the
 orchestrator/backtester rather than recomputing anything
 live - re-running Chronos on every web request would be
 far too slow for a page load.
+
+WHICH PLANT IT SHOWS
+--------------------
+One plant per server, chosen by SOLAR_PLANT the same way
+every other entry point chooses (default sirmour):
+
+    SOLAR_PLANT=kasipet python app.py            # port 8000
+    SOLAR_PLANT=bhupalpally PORT=8001 python app.py
+
+Three plants side by side means three servers on three
+ports. That is deliberate rather than a plant selector in
+the UI: the dashboard reads whatever the configuration
+points at, so it can never show one plant's schedule under
+another's name.
 =========================================================
 """
 
+import os
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from config.config import settings
 from utils import file_manager
 
 
@@ -47,11 +63,13 @@ def records_with_nulls(dataframe):
         dataframe.notna(), None
     ).to_dict(orient="records")
 
-app = FastAPI(title="Solar Forecasting Dashboard")
+PLANT = settings["plant"]
 
-SCHEDULE_PATH = Path("outputs/schedules/current_final_schedule.csv")
-HISTORY_PATH = Path("outputs/reports/backtest_results.csv")
-DETAIL_PATH = Path("outputs/reports/backtest_detail.csv")
+app = FastAPI(title=f"Solar Forecasting Dashboard - {PLANT['name']}")
+
+SCHEDULE_PATH = Path(settings["outputs"]["schedules"]) / "current_final_schedule.csv"
+HISTORY_PATH = Path(settings["outputs"]["reports"]) / "backtest_results.csv"
+DETAIL_PATH = Path(settings["outputs"]["reports"]) / "backtest_detail.csv"
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
@@ -59,6 +77,24 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 @app.get("/")
 def index():
     return FileResponse("static/index.html")
+
+
+@app.get("/api/plant")
+def get_plant():
+    """
+    Which plant this server is serving. The page can show it in the
+    header so a screenshot of one plant's dashboard is never mistaken
+    for another's.
+    """
+
+    return {
+        "key": PLANT["key"],
+        "name": PLANT["name"],
+        "state": PLANT.get("state"),
+        "capacity_mw": PLANT["capacity_mw"],
+        "run_times": settings["forecast"]["run_times"],
+        "freeze_blocks": settings.get("schedule_rules", {}).get("freeze_blocks", 0),
+    }
 
 
 @app.get("/api/schedule/current")
@@ -118,4 +154,9 @@ if __name__ == "__main__":
 
     import uvicorn
 
-    uvicorn.run(app, host="127.0.0.1", port=8000)
+    # PORT so three plants' dashboards can run side by side.
+    port = int(os.getenv("PORT", "8000"))
+
+    print(f"Serving {PLANT['name']} on http://127.0.0.1:{port}")
+
+    uvicorn.run(app, host="127.0.0.1", port=port)

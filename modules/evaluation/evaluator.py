@@ -30,17 +30,30 @@ class Evaluator:
             settings["paths"]["enercast_data"]
         )
 
+        # Enercast is a Sirmour-only reference feed. The Telangana
+        # plants have none, so their overlay turns this off and every
+        # Enercast column simply does not appear in their reports -
+        # rather than the reports carrying an empty column that looks
+        # like a data outage.
+        enercast = settings.get("enercast", {})
+        self.enercast_enabled = enercast.get("enabled", True)
+        self.enercast_prefix = enercast.get("filename_prefix", "Sirmour")
+
     # --------------------------------------------------
 
     def load_enercast_day(self, date):
         """
         Loads the Enercast schedule for one calendar day.
-        Returns None if no Enercast file exists for that date.
+        Returns None if this plant has no Enercast feed, or if no
+        Enercast file exists for that date.
         """
+
+        if not self.enercast_enabled:
+            return None
 
         month_name = date.strftime("%B").lower()
 
-        filename = f"Sirmour_{date.day}{month_name}_enercast.csv"
+        filename = f"{self.enercast_prefix}_{date.day}{month_name}_enercast.csv"
 
         file_path = self.enercast_folder / filename
 

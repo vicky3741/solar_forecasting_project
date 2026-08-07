@@ -1,12 +1,73 @@
-# Solar Forecasting Project — Sirmour Solar Plant
+# Solar Forecasting Project — Sirmour, Kasipet, Bhupalpally
 
-AI-based intraday solar generation forecasting for the Sirmour Solar Plant
-(5.1 MW, Rajasthan, India). The system forecasts plant generation for the
-same day up to 19:00 IST at 15-minute resolution, re-running at 7 fixed
-times daily, and continuously maintains a single **Current Final Schedule**.
+AI-based intraday solar generation forecasting for **three plants**. Each
+one forecasts its own generation for the same day up to 19:00 IST at
+15-minute resolution, re-running at fixed times through the day, and
+continuously maintains its own **Current Final Schedule**.
+
+| Plant | State | Capacity | Runs/day | Effective time | Since |
+|---|---|---|---|---|---|
+| Sirmour | Madhya Pradesh | 5.1 MW | 7 | none (see below) | project start |
+| Kasipet | Telangana | 15 MW | 8 (adds 17:15) | 3 blocks / 45 min | 2026-08-08 |
+| Bhupalpally | Telangana | 10 MW | 8 (adds 17:15) | 3 blocks / 45 min | 2026-08-08 |
 
 Built by **Team 2** (Vikrant, Abhijit, Sandhyarani, Arpita) using only
 free / open-source tooling — no paid APIs.
+
+---
+
+## Three plants, one codebase, zero shared state
+
+Everything below describes one pipeline. It runs three times over, once
+per plant, and the plants never touch each other's anything: separate
+meter folders, separate outputs, separate model state, separate S3
+prefixes, separate weather caches, separate logs, separate services.
+
+The mechanism is one environment variable:
+
+```bash
+SOLAR_PLANT=kasipet python -m modules.orchestrator.pipeline
+```
+
+`config/config.py` reads it, loads `config/settings.yaml` as the base
+layer, and deep-merges `config/plants/<key>.yaml` over it. Every module
+already read a single `settings` object, so re-pointing that object
+re-points the entire pipeline — no module in the codebase knows there is
+more than one plant.
+
+**`config/settings.yaml` is, and stays, Sirmour.** Its overlay
+(`config/plants/sirmour.yaml`) is nearly empty on purpose, so with
+`SOLAR_PLANT` unset the resolved configuration is byte-identical to what
+the live Sirmour automation has always used. Every plant-specific knob
+added for the new plants carries Sirmour's existing behaviour as its
+default for the same reason. When you add a knob, follow that rule.
+
+### Effective time (freeze horizon)
+
+The mentor's *Effective Time Schedule Guide* (2026-08-08): a schedule
+generated at 11:15 does **not** take effect at 11:15. The next few blocks
+are already declared to the grid operator and stay at whatever the
+previous schedule said. Sirmour's horizon is 6 blocks (90 min); the
+Kasipet/Kothagudem family's is 3 blocks (45 min).
+
+```
+run at 11:15 = engine block 46
+  Sirmour   freeze 46-51  ->  new schedule from block 52 (12:45)
+  Kasipet   freeze 46-48  ->  new schedule from block 49 (12:00)
+```
+
+This is why the same day's final report differs between the three plants:
+they revise at different speeds. It lives in
+`modules/scheduling/effective_time.py` and is configured per plant as
+`schedule_rules.freeze_blocks`.
+
+> **Sirmour is currently set to 0, not 6.** Sirmour has published with no
+> freeze horizon since the pipeline was built, and every tuned constant in
+> `settings.yaml` was validated against that behaviour. Raising it to 6 is
+> a one-line change plus a re-backtest — the machinery is built and already
+> live on the other two plants. Decide, then flip it.
+
+Details of the per-plant automation: [`automation/README.md`](automation/README.md).
 
 ---
 
@@ -129,30 +190,40 @@ stale the way a saved-once model can.
 ## Project structure
 
 ```
-config/            settings.yaml (plant, models, tuned weights) + loader
-data/
+config/            settings.yaml  = the BASE layer, and it is Sirmour
+  plants/          sirmour.yaml (nearly empty), kasipet.yaml, bhupalpally.yaml
+                   -> deep-merged over settings.yaml, chosen by SOLAR_PLANT
+data/                              --- Sirmour ---
   historical/      Daily meter CSVs (15-min: power, GHI, POA, weather)
-  enercast/        Enercast schedule CSVs (validation reference)
+  enercast/        Enercast schedule CSVs (validation reference; Sirmour only)
   windy/videos/    Windy cloud animation captures (.webm)
   processed/       Combined preprocessed dataset
+  plants/          --- the other plants, same layout one level down ---
+    kasipet/       historical/ processed/ windy/ weather/ ...
+    bhupalpally/   historical/ processed/ windy/ weather/ ...
 modules/
   preprocessing/   Validation, outlier clipping, 15-min alignment, features
+                   (each plant's vendor schema declared in config data_schema)
   vision/          Frame extraction -> Gemini -> JSON parsing (cached per video)
   fusion/          Vision features -> per-block forecast adjustment profile
   forecasting/     clearsky.py (pvlib), chronos_model.py, predictor.py (hybrid),
                    residual_correction.py (LightGBM error-learning),
                    case_based_correction.py (kNN analogues),
                    block_bias_correction.py (time-of-day penalty shape)
+  scheduling/      effective_time.py - the per-plant freeze horizon
   evaluation/      metrics.py, evaluator.py, backtester.py (+ tuning grid)
   orchestrator/    pipeline.py - one full forecast run end to end
-  scheduler/       Auto-triggers the orchestrator at the 7 daily run times
-models/            Trained residual-correction model (regenerate via
-                   tests/test_residual_experiment.py)
-utils/             Logger (loguru) + file I/O helpers
-tests/             Runnable smoke tests / backtest for every module
+  scheduler/       Auto-triggers the orchestrator at that plant's run times
+automation/        One launcher + one systemd unit per plant, and the notes
+                   on lock ports, staggering and EC2 memory
+models/            Sirmour's learned state; models/plants/<key>/ for the rest
+utils/             Logger (loguru) + file I/O and per-plant path helpers
+tests/             Runnable smoke tests / backtest for every module, plus
+                   ingest_plant_history.py and backfill_day_schedules.py
 static/            Dashboard frontend (Chart.js)
 app.py             FastAPI web app serving the dashboard + JSON API
-outputs/           Generated: forecasts, schedules, reports, frames (not in git)
+outputs/           Sirmour's generated files; outputs/plants/<key>/ for the
+                   rest (not in git)
 ```
 
 Note: the empty `__init__.py` files are **required** — they mark folders
@@ -170,29 +241,80 @@ pip install -r requirements.txt
 
 # 3. Create a .env file in the project root containing:
 GOOGLE_API_KEY=your_gemini_api_key_here
+AWS_ACCESS_KEY_ID=...
+AWS_SECRET_ACCESS_KEY=...
+
+# Optional - a separate Windy key per plant, so one plant's exhausted
+# quota cannot take the other two down. Falls back to WINDY_API_KEY,
+# and no key at all still works (free public embed).
+WINDY_API_KEY_SIRMOUR=...
+WINDY_API_KEY_KASIPET=...
+WINDY_API_KEY_BHUPALPALLY=...
 ```
 
 ## Running it
 
-All commands from the project root with the venv activated.
+All commands from the project root with the venv activated. **Every one of
+them takes `SOLAR_PLANT`**; leave it unset and you get Sirmour.
 
 ```bash
-# Refresh the processed dataset from data/historical/
+# Refresh the processed dataset from this plant's historical folder
 python -m tests.test_preprocessing
 
 # Run one full forecast cycle (produces the Current Final Schedule)
 python -m tests.test_orchestrator
 
-# Run the full 49-run backtest + parameter tuning (feeds the dashboard)
+# Run the full backtest + parameter tuning (feeds the dashboard)
 python -m tests.test_backtest
 
 # Start the web dashboard, then open http://localhost:8000
 python app.py
 ```
 
-The scheduler (`modules/scheduler/scheduler.py`) can run the orchestrator
-automatically at the 7 official times: 06:45, 08:15, 09:45, 11:15, 12:45,
-14:15, 15:45 IST.
+For one of the other plants (PowerShell: `$env:SOLAR_PLANT="kasipet"`):
+
+```bash
+SOLAR_PLANT=kasipet python -m tests.test_preprocessing
+SOLAR_PLANT=kasipet python -m modules.orchestrator.pipeline
+```
+
+The scheduler (`modules/scheduler/scheduler.py`) runs the orchestrator
+automatically at that plant's official times — 06:45, 08:15, 09:45, 11:15,
+12:45, 14:15, 15:45 IST, plus 17:15 for the two Telangana plants. One
+scheduler process per plant; see [`automation/`](automation/README.md).
+
+## Onboarding a new plant
+
+Everything a fourth plant needs is data plus one config file.
+
+```bash
+# 1. config/plants/<key>.yaml - copy kasipet.yaml and change the
+#    coordinates, capacity, paths, prefixes, lock port and log name.
+
+# 2. Load its meter history. The files are validated against that
+#    plant's declared schema first, so a wrong column name or date
+#    order is caught here rather than becoming a silently wrong
+#    forecast later.
+SOLAR_PLANT=<key> python -m tests.ingest_plant_history "/path/to/vendor/folder" --upload
+
+# 3. Reconstruct every day it has data for, oldest first. Until this
+#    runs, the block-bias corrector has nothing to learn from and
+#    stays switched off.
+SOLAR_PLANT=<key> python -m tests.backfill_day_schedules --quiet
+
+# 4. Build its processed dataset, backtest, and case store.
+SOLAR_PLANT=<key> python -m tests.test_preprocessing
+SOLAR_PLANT=<key> python -m tests.test_backtest
+SOLAR_PLANT=<key> python -m tests.test_case_based_experiment
+
+# 5. Add a launcher in automation/ and start it.
+```
+
+Step 4's backtest also prints the tuning grid for `chronos_weight` and
+`clearsky.performance_ratio`. The values a new plant inherits from
+`settings.yaml` were **tuned on Sirmour** and are a documented starting
+point, not validated numbers for that site — re-tune them once the plant
+has a comparable run of days.
 
 ## Building a day's report (start here)
 
@@ -204,13 +326,24 @@ day. The first rebuilds the schedule, the second turns it into the
 workbook that goes to the mentor:
 
 ```bash
-# Step 1 - reconstruct the day's schedule (needs meter data in
-# data/historical/ and the day's Windy clips, local or in S3)
+# Step 1 - reconstruct the day's schedule (needs this plant's meter data
+# and the day's Windy clips, local or in S3)
 python -m tests.generate_schedule_for_day 2026-07-31
 
 # Step 2 - the mentor-facing workbook: per-block MW, DSM penalty,
 # how many blocks fell outside the deviation band, Enercast alongside
 python -m tests.build_penalty_report 2026-07-31
+```
+
+Both steps are per plant, and the three plants write to three separate
+folders — so building all three days is the same two commands run three
+times:
+
+```bash
+for p in sirmour kasipet bhupalpally; do
+  SOLAR_PLANT=$p python -m tests.generate_schedule_for_day 2026-08-06
+  SOLAR_PLANT=$p python -m tests.build_penalty_report    2026-08-06
+done
 ```
 
 `build_penalty_report.py` writes formulas, not baked-in numbers, so the
@@ -224,6 +357,9 @@ that is wanted.
 Add a day's Enercast file as `data/enercast/Sirmour_<D>july_enercast.csv`
 (columns `Block, Time, Scheduled MW, ...`) and both reports pick it up
 automatically; leave it out and they simply omit the Enercast columns.
+Enercast is a Sirmour-only feed — the Telangana plants have
+`enercast.enabled: false`, so their reports carry no Enercast columns at
+all rather than an empty one that reads like a data outage.
 
 **2. Real unit/smoke tests** - `test_preprocessing.py`, `test_predictor.py`,
 `test_evaluator.py`, `test_fusion.py`, `test_clearsky.py`,
@@ -248,9 +384,17 @@ pattern the model is being taught still holds:
 python -m tests.test_block_penalty_pattern 5
 ```
 
-**Every tuned constant lives in `config/settings.yaml`**, with a comment
-saying what tuned it and when. Change behaviour there rather than in the
-modules.
+**5. Multi-plant tooling** — `ingest_plant_history.py` (load a plant's
+meter CSVs, validated against its own schema, optionally into S3),
+`backfill_day_schedules.py` (reconstruct every available day, oldest
+first), `tune_plant_clearsky.py` (calibrate that site's clear-sky
+performance ratio over a range wide enough to find a real optimum), and
+`test_effective_time.py` (pins the freeze horizon to the mentor's guide —
+both of its tables, verbatim).
+
+**Every tuned constant lives in `config/settings.yaml`** (Sirmour) or in
+`config/plants/<key>.yaml` (the others), with a comment saying what tuned
+it and when. Change behaviour there rather than in the modules.
 
 ## Dashboard
 
@@ -264,6 +408,8 @@ modules.
 - **Accuracy history** — average deviation per day, ours vs Enercast
 
 ## Current results (honest)
+
+### Sirmour
 
 Backtested point-in-time (no lookahead) across 36 days (Jul 1 – Aug 5) ×
 7 run-times = 252 runs, WITH the Open-Meteo weather signal (refreshed
@@ -288,6 +434,34 @@ The backtest measures the **base hybrid only**. It does not apply the
 case-based or block bias corrections, so it is a floor, not the shipped
 schedule's accuracy. For that, read the daily reports in
 `outputs/reports/`.
+
+### Kasipet and Bhupalpally (first pass, 2026-08-08)
+
+Same backtest, over their own 37 days (Jul 1 – Aug 6) × 8 run-times =
+296 runs each, after calibrating each site's clear-sky performance ratio:
+
+| | Kasipet (15 MW) | Bhupalpally (10 MW) |
+|---|---|---|
+| Deviation (% of capacity) | 7.43% | 7.40% |
+| MAE | 1.11 MW | 0.74 MW |
+| Calibrated performance ratio | 0.975 (from 0.80) | 1.00 (from 0.80) |
+| Gain from that calibration | +0.77 pts | +0.75 pts |
+| Case-based correction, leave-one-day-out | +0.24 pts, 26/37 days | +0.53 pts, 28/37 days |
+
+Read these honestly too:
+
+- **No vision at all yet.** Neither plant has a single Windy clip — their
+  capture starts when their schedulers do. Every number above is the
+  no-vision floor.
+- **Everything except the performance ratio is Sirmour-tuned.** The blend
+  weights, weather weight and correction strengths were inherited and are
+  a starting point, not validated for these sites.
+- **The performance ratio was the big one.** Inheriting Sirmour's 0.80 set
+  the forecast's ceiling too low and under-forecast every clear block:
+  the first reconstructions came out 6% and 15% short on daily energy.
+  Watch for that signature on any new plant, and note that the default
+  grid in `test_backtest.py` stops at 0.85 and would have reported the
+  edge of its own range as the answer.
 
 Known limitations, stated plainly:
 

@@ -32,6 +32,7 @@ from modules.storage.s3_client import S3Storage
 from modules.vision.vision_module import VisionModule
 from modules.fusion.fusion import FeatureFusion
 from modules.evaluation import metrics
+from utils.file_manager import processed_data_path
 
 
 CAPACITY_KW = settings["plant"]["capacity_mw"] * 1000
@@ -54,7 +55,7 @@ def main():
 
     test_day = sys.argv[1] if len(sys.argv) > 1 else "2026-07-14"
 
-    df = pd.read_csv("data/processed/processed_data.csv", parse_dates=["timestamp"])
+    df = pd.read_csv(processed_data_path(), parse_dates=["timestamp"])
 
     predictor = HybridPredictor()
     s3 = S3Storage()
