@@ -181,24 +181,31 @@ config = ConfigLoader()
 
 # Shortcut used throughout the project
 settings = config.settings
-# Each provider's key is loaded independently. A missing key is left
-# as None and only raised when THAT provider is actually selected and
-# used - so a Gemini-only setup needs no OPENAI_API_KEY and vice versa.
-settings["vision"]["api_key"] = os.getenv("GOOGLE_API_KEY")          # Gemini
+
+# Gemini key, PER PLANT. This one has to be split three ways: the free
+# tier caps requests per day PER MODEL, and the three plants together now
+# want 7 + 8 + 8 = 23 vision calls a day against a cap of 20. On one
+# shared key the third plant of the day would quietly lose its cloud
+# signal (vision failures degrade silently to no-vision), so each plant
+# gets its own:
+#     GOOGLE_API_KEY_SIRMOUR / _KASIPET / _BHUPALPALLY
+# The plain GOOGLE_API_KEY stays the fallback for any plant without one,
+# so an existing single-key setup keeps working untouched.
+settings["vision"]["api_key"] = (
+    os.getenv(f"GOOGLE_API_KEY_{PLANT_KEY.upper()}")
+    or os.getenv("GOOGLE_API_KEY")
+)
 # ChatGPT direct OR any OpenAI-compatible gateway (OpenRouter). Whichever
 # key is set works - pair it with the matching openai_base_url in settings.
+# A missing key is left as None and only raised when THAT provider is
+# actually selected, so a Gemini-only setup needs no OPENAI_API_KEY.
 settings["vision"]["openai_api_key"] = (
     os.getenv("OPENAI_API_KEY") or os.getenv("OPENROUTER_API_KEY")
 )
 
-# Windy key, per plant. Each plant gets its own so the three automations
-# never share a rate limit and one plant's exhausted quota cannot take
-# the other two down with it: WINDY_API_KEY_KASIPET,
-# WINDY_API_KEY_BHUPALPALLY, WINDY_API_KEY_SIRMOUR. The plain
-# WINDY_API_KEY remains the shared fallback (and is what Sirmour has
-# always used), and no key at all is still fine - the capture falls back
-# to Windy's free public embed.
-settings["windy_capture"]["api_key"] = (
-    os.getenv(f"WINDY_API_KEY_{PLANT_KEY.upper()}")
-    or os.getenv("WINDY_API_KEY")
-)
+# Windy key: ONE key, shared by all three plants, by request 2026-08-08.
+# Unlike Gemini this does not need splitting - the key only unlocks the
+# premium overlays on the embed page we screen-record, and three captures
+# a day-part is nowhere near a rate limit. No key at all still works; the
+# capture falls back to Windy's free public embed.
+settings["windy_capture"]["api_key"] = os.getenv("WINDY_API_KEY")

@@ -240,16 +240,23 @@ python -m venv .venv
 pip install -r requirements.txt
 
 # 3. Create a .env file in the project root containing:
-GOOGLE_API_KEY=your_gemini_api_key_here
+
+# One Gemini key PER PLANT. The free tier caps requests per day per
+# model, and the three plants together want 23 vision calls a day
+# against a cap of 20 - on a single shared key the third plant would
+# quietly lose its cloud signal every day.
+GOOGLE_API_KEY_SIRMOUR=...
+GOOGLE_API_KEY_KASIPET=...
+GOOGLE_API_KEY_BHUPALPALLY=...
+GOOGLE_API_KEY=...          # fallback for any plant without its own
+
 AWS_ACCESS_KEY_ID=...
 AWS_SECRET_ACCESS_KEY=...
 
-# Optional - a separate Windy key per plant, so one plant's exhausted
-# quota cannot take the other two down. Falls back to WINDY_API_KEY,
-# and no key at all still works (free public embed).
-WINDY_API_KEY_SIRMOUR=...
-WINDY_API_KEY_KASIPET=...
-WINDY_API_KEY_BHUPALPALLY=...
+# One Windy key, shared by all three. It only unlocks the premium
+# overlays on the page we screen-record, so there is nothing to split.
+# Optional - without it the capture uses the free public embed.
+WINDY_API_KEY=...
 ```
 
 ## Running it

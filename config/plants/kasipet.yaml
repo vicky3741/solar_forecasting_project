@@ -102,9 +102,10 @@ storage:
 windy_capture:
   video_dir: data/plants/kasipet/windy/new_videos
   screenshot_dir: data/plants/kasipet/windy/screenshots
-  # Shared with the other plants on purpose: this is one Windy browser
-  # login, not a quota. The per-plant API key comes from
-  # WINDY_API_KEY_KASIPET in .env (see config/config.py).
+  # Shared with the other plants on purpose: one Windy browser login and
+  # one WINDY_API_KEY serve all three. Unlike the Gemini key there is no
+  # quota to split - the key only unlocks premium overlays on the embed
+  # page we screen-record.
   session_file: windy_session.json
 
 weather:

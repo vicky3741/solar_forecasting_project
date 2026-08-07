@@ -83,6 +83,8 @@ storage:
 windy_capture:
   video_dir: data/plants/bhupalpally/windy/new_videos
   screenshot_dir: data/plants/bhupalpally/windy/screenshots
+  # One Windy login and one WINDY_API_KEY for all three plants - see the
+  # note in kasipet.yaml.
   session_file: windy_session.json
 
 weather:
