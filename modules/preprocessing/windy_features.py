@@ -515,14 +515,121 @@ class WindyFeatureBuilder:
 
     # --------------------------------------------------
 
+    def find_satellite_clip(self, run_time):
+        """
+        The latest same-day satellite clip at or before run_time, or
+        None. Bounded by run_time for the same no-lookahead reason
+        latest_values_file is.
+        """
+
+        from modules.vision.vision_module import VisionModule
+
+        vision = VisionModule.__new__(VisionModule)   # no API client needed
+
+        # find_latest_video compares against naive datetimes parsed out
+        # of the filenames, so the tz has to come off first - and by
+        # converting to local wall clock, not by discarding the zone,
+        # which would move the cutoff 5.5 hours and let a run pick up a
+        # clip recorded after it.
+        run_time = pd.Timestamp(run_time)
+
+        if run_time.tz is not None:
+            run_time = run_time.tz_convert(self.timezone).tz_localize(None)
+
+        folders = [
+            Path(settings.get("windy_capture", {}).get(
+                "video_dir", "data/windy/new_videos"
+            )),
+            Path(settings["paths"]["windy_data"]) / "videos",
+        ]
+
+        for folder in folders:
+
+            if not folder.exists():
+                continue
+
+            found = vision.find_latest_video(folder, run_time)
+
+            if found is not None:
+                return found
+
+        return None
+
+    # --------------------------------------------------
+
+    def attach_satellite(self, grid, run_time):
+        """
+        Adds the satellite clip's OpenCV features (thin/thick cloud,
+        entropy, flow structure - see modules/vision/satellite_features.py)
+        and returns them separately as well.
+
+        These describe ONE MOMENT - the clip's capture time - so they
+        are written to every row as constants, which is only honest
+        because `sat_age_minutes` sits beside them saying how stale
+        that observation is for each block. The prompt builder uses
+        the returned dict to present them as a current-sky observation
+        rather than as per-block data.
+        """
+
+        clip = self.find_satellite_clip(run_time)
+
+        if clip is None:
+            self.logger.info(
+                "No same-day satellite clip at or before this run time "
+                "- satellite features skipped"
+            )
+            grid["sat_age_minutes"] = np.nan
+            return grid, None
+
+        from modules.vision.satellite_features import extract_for
+        from modules.vision.vision_module import VisionModule
+
+        features = extract_for(clip)
+
+        if features is None:
+            grid["sat_age_minutes"] = np.nan
+            return grid, None
+
+        captured = VisionModule.parse_video_time(Path(clip).name)
+
+        if captured is not None:
+            captured = pd.Timestamp(captured).tz_localize(self.timezone)
+            features["sat_captured_at"] = str(captured)
+
+            grid["sat_age_minutes"] = np.round(
+                (
+                    epoch_seconds(grid["timestamp"])
+                    - epoch_seconds(pd.DatetimeIndex([captured]))[0]
+                ) / 60.0,
+                1,
+            )
+        else:
+            grid["sat_age_minutes"] = np.nan
+
+        for key, value in features.items():
+            if key not in ("sat_video", "sat_captured_at"):
+                grid[key] = value
+
+        self.logger.info(
+            f"Satellite features from {Path(clip).name}: "
+            f"thick {features['sat_thick_cloud_pct']}%, "
+            f"thin {features['sat_thin_cloud_pct']}%, "
+            f"entropy {features['sat_entropy']}, "
+            f"trend {features['sat_cloud_trend_pct']:+.2f}%"
+        )
+
+        return grid, features
+
+    # --------------------------------------------------
+
     def build(self, run_time=None, meter=None, values_path=None):
         """
         Builds the full per-block feature table for run_time's day.
 
-        Returns (frame, values_path). `values_path` is None when no
-        scraped file was available - the table is still returned, with
-        the Windy columns blank, so a caller can see exactly what was
-        and was not known.
+        Returns (frame, info). `info` carries the scraped-values path
+        and the satellite observation, either of which may be None -
+        the table is still returned, with those columns blank, so a
+        caller can see exactly what was and was not known.
         """
 
         run_time = pd.Timestamp(run_time or pd.Timestamp.now())
@@ -552,12 +659,14 @@ class WindyFeatureBuilder:
             payload = json.loads(Path(values_path).read_text(encoding="utf-8"))
             grid = self.attach_windy(grid, payload)
 
+        grid, satellite = self.attach_satellite(grid, run_time)
+
         grid = self.attach_actuals(grid, meter, run_time)
 
         grid.insert(0, "plant", self.plant_tag)
         grid["run_time"] = run_time
 
-        return grid, values_path
+        return grid, {"values_path": values_path, "satellite": satellite}
 
     # --------------------------------------------------
 
@@ -636,9 +745,11 @@ def main():
         except Exception as error:
             print(f"(meter history unavailable: {error})")
 
-    frame, values_path = builder.build(run_time=args.run_time, meter=meter)
+    frame, info = builder.build(run_time=args.run_time, meter=meter)
 
-    print(f"windy values: {values_path}")
+    print(f"windy values: {info['values_path']}")
+    print(f"satellite   : "
+          f"{info['satellite']['sat_video'] if info['satellite'] else 'none'}")
     print(f"rows        : {len(frame)}")
 
     daylight = frame[frame["is_daylight"] == 1]

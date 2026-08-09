@@ -201,11 +201,76 @@ class LLMScheduler:
 
     # --------------------------------------------------
 
-    def build_prompt(self, features, run_time, ahead):
+    def satellite_section(self, satellite, run_time):
+        """
+        The satellite clip as a CURRENT SKY OBSERVATION block.
+
+        Deliberately not columns in the block table. One clip
+        describes one moment; pasting it down 30 rows would make the
+        model read a single observation as if it were a forecast that
+        held all afternoon - the precise mistake that made the
+        reference features log worthless. Presenting it as "here is
+        the sky right now, and here is how old that is" says what it
+        actually is.
+        """
+
+        if not satellite:
+            return "(no satellite clip available for this run)"
+
+        captured = satellite.get("sat_captured_at")
+
+        age = ""
+
+        if captured:
+            minutes = (run_time - pd.Timestamp(captured)).total_seconds() / 60
+            age = f", captured {minutes:.0f} minutes ago"
+
+        trend = satellite["sat_cloud_trend_pct"]
+        entropy = satellite["sat_entropy"]
+
+        building = (
+            "converging (cloud building)"
+            if satellite["sat_flow_divergence"] < 0
+            else "spreading out (cloud dissipating)"
+        )
+
+        direction = "clouding over" if trend > 0 else "clearing"
+
+        texture = (
+            "broken and patchy - expect volatile blocks" if entropy > 6
+            else "fairly uniform sky - blocks should be steady"
+        )
+
+        return f"""Satellite imagery over the plant{age}:
+  cloud cover      : {satellite['sat_thick_cloud_pct']:.0f}% thick, \
+{satellite['sat_thin_cloud_pct']:.0f}% thin, \
+{satellite['sat_clear_pct']:.0f}% clear
+  trend over clip  : {trend:+.1f}% cloud ({direction})
+  texture entropy  : {entropy:.2f} of 8 ({texture})
+  where the cloud is: north {satellite['sat_north_cloud_pct']:.0f}%, \
+south {satellite['sat_south_cloud_pct']:.0f}%, \
+west {satellite['sat_west_cloud_pct']:.0f}%, \
+east {satellite['sat_east_cloud_pct']:.0f}%
+  motion structure : field is {building}; \
+rotation {satellite['sat_flow_vorticity']:.3f}, \
+movement energy {satellite['sat_flow_kinetic_energy']:.1f}
+
+This is a MEASUREMENT of the sky that is actually there, unlike the Windy \
+columns below which are a forecast. Where the two disagree about conditions \
+NOW, the satellite is the observation. It says nothing directly about later \
+blocks - use it to judge whether the forecast has the current state right, \
+and note that Windy's satellite animation dissolves between hourly stills, so \
+cloud DIRECTION is not measurable from it and is not reported."""
+
+    # --------------------------------------------------
+
+    def build_prompt(self, features, run_time, ahead, satellite=None):
 
         table, _ = self.forecast_table(features, run_time)
 
         history = self.recent_history(features)
+
+        sky = self.satellite_section(satellite, run_time)
 
         # Counted over the blocks actually IN the table, not over every
         # remaining block of the day. Windy's 3-hourly steps land at
@@ -233,6 +298,9 @@ class LLMScheduler:
 
 WHAT THE PLANT HAS ACTUALLY GENERATED TODAY SO FAR
 {history}
+
+CURRENT SKY OBSERVATION (satellite)
+{sky}
 
 BLOCKS STILL TO SCHEDULE ({count} blocks, {first_block} to {last_block})
 {table}
@@ -388,7 +456,8 @@ the {count} blocks from {first_block} to {last_block}, in order, with no gaps.\
 
     # --------------------------------------------------
 
-    def decide(self, features, run_time, previous=None, dry_run=False):
+    def decide(self, features, run_time, previous=None, dry_run=False,
+               satellite=None):
         """
         One fusion + scheduling decision.
 
@@ -409,13 +478,14 @@ the {count} blocks from {first_block} to {last_block}, in order, with no gaps.\
                 f"No daylight blocks left to schedule after {run_time:%H:%M}"
             )
 
-        prompt = self.build_prompt(features, run_time, ahead)
+        prompt = self.build_prompt(features, run_time, ahead, satellite)
 
         meta = {
             "run_time": str(run_time),
             "plant": self.plant_tag,
             "blocks_requested": len(ahead),
             "output_mode": self.output_mode,
+            "satellite_clip": (satellite or {}).get("sat_video"),
             "prompt_chars": len(prompt),
             "prompt": prompt,
         }
@@ -524,16 +594,21 @@ def main():
         print(f"(meter history unavailable: {error})")
         meter = None
 
-    features, values_path = builder.build(run_time=args.run_time, meter=meter)
+    features, info = builder.build(run_time=args.run_time, meter=meter)
 
     run_time = features["run_time"].iloc[0]
 
-    print(f"windy values : {values_path}")
+    satellite = info["satellite"]
+
+    print(f"windy values : {info['values_path']}")
+    print(f"satellite    : {satellite['sat_video'] if satellite else 'none'}")
     print(f"run time     : {run_time}")
 
     scheduler = LLMScheduler()
 
-    schedule, meta = scheduler.decide(features, run_time, dry_run=args.dry_run)
+    schedule, meta = scheduler.decide(
+        features, run_time, dry_run=args.dry_run, satellite=satellite
+    )
 
     paths = scheduler.save(schedule, meta, run_time)
 
