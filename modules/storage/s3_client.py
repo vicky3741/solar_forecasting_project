@@ -15,11 +15,22 @@ Bucket data-lake layout :
     e.g. inputs/MadhyaPradesh/SIRMOUR/2026-07-15/Metered_Data/2026_07_15_SOLAR_INV.csv
          inputs/Telangana/KASIPET/2026-08-06/Metered_Data/kasipet_20260806.csv
 
-All three plants share ONE bucket and one AWS account, by request.
-They are kept apart purely by prefix - each plant's overlay in
-config/plants/ sets its own site_prefix, video_prefix and
-output_prefix, so nothing this client does can reach another plant's
-data.
+EACH PLANT HAS ITS OWN BUCKET (2026-08-09), in one shared AWS
+account and region. `bucket`, like every prefix below it, comes from
+this plant's overlay in config/plants/, so an instance of this class
+can only ever see the plant that SOLAR_PLANT resolved to:
+
+    sirmour       sirmour-team2-storage
+    kasipet       kasipet-team2-storage
+    bhupalpally   bhupalpally-team2-storage
+
+The prefixes are the ones from when all three shared one bucket and
+are deliberately unchanged, so each plant's keys are identical to
+what they were - the split was a prefix-preserving copy. That also
+means the prefixes are now redundant belt-and-braces isolation on
+top of the bucket boundary, which is the point: the three captures
+all fire at the same official run time, and nothing they do should
+be able to reach another plant's clips.
 
 This writes its forecast outputs back under
     outputs/team2/<SITE>/...

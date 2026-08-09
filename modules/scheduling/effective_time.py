@@ -40,9 +40,10 @@ TWO THINGS THIS MODULE IS CAREFUL ABOUT
 
 2. freeze_blocks of 0 or 1 means "no freeze" and reproduces the
    original behaviour exactly - every block after the run time
-   is rewritten. That is what Sirmour is set to, deliberately,
-   so this module changes nothing for the plant that is already
-   live. See schedule_rules in config/settings.yaml.
+   is rewritten. No plant is set that way any more: Sirmour ran
+   at 0 until 2026-08-09, when the mentor confirmed it is on the
+   guide's 6-block rule. See schedule_rules in
+   config/settings.yaml.
 =========================================================
 """
 

@@ -68,14 +68,24 @@ schedule_rules:
   # engine block (the block the run fires in) inclusive. The guide sets
   # Sirmour to 6 blocks / 90 min and Kasipet-Kothagudem to 3 / 45 min.
   #
-  # KEPT AT 0 FOR SIRMOUR ON PURPOSE. Sirmour has been publishing with
-  # no freeze horizon since the pipeline was built, every tuned constant
-  # in this file was validated against that behaviour, and the user's
-  # instruction with the new plants was explicitly not to disturb the
-  # running Sirmour automation. Raise this to 6 (one line) once the
-  # change has been agreed and re-backtested - the machinery is built
-  # and already live on the other two plants.
-  freeze_blocks: 0
+  # RAISED 0 -> 6 ON 2026-08-09, mentor confirmed Sirmour is on the
+  # 6-block / 90-minute effective time. It ran at 0 until then only
+  # because nobody had confirmed the rule applied here.
+  #
+  # This COSTS accuracy and that is expected. Measured over 20 days
+  # (Jul 19 - Aug 7, tests/test_freeze_horizon_experiment.py):
+  #
+  #     deviation   4.190% -> 4.654%          (+0.46 pct points)
+  #     penalty     Rs 178 -> Rs 263 per day  (+48%)
+  #
+  # The freeze withholds fresher meter data and a newer cloud reading
+  # from blocks that are already declared, so it can only ever make the
+  # number worse. That is not an argument against it: a schedule built
+  # without the freeze is one the operator would not accept, and the old
+  # 4.19% was flattered by revisions we were never allowed to publish.
+  # Any deviation figure quoted from before this date is on the old,
+  # non-compliant basis - re-run the backtest before comparing.
+  freeze_blocks: 6
 
 # Enercast is a reference schedule shown side by side, never a training
 # input (mentor brief). Only Sirmour has an Enercast feed.
@@ -129,13 +139,14 @@ vision:
   # of the 90 min between scheduling times, so a clip can never be claimed
   # by the wrong run.
   video_match_tolerance_minutes: 20
-  # Whether a run with no local clip may fall back to the shared S3 bucket.
-  # Turn OFF when a day must be evaluated on a specific hand-picked set,
-  # otherwise the bucket's own auto-captures quietly fill the gaps and the
-  # report no longer reflects the clips it claims to use. Was OFF only for
-  # the 2026-07-30 report (built on five hand-recorded clips); back ON
-  # (the normal setting) since our own 7x/day EC2 automation is the thing
-  # uploading the real captures to this bucket for every other day.
+  # Whether a run with no local clip may fall back to this plant's S3
+  # bucket. Turn OFF when a day must be evaluated on a specific
+  # hand-picked set, otherwise the bucket's own auto-captures quietly
+  # fill the gaps and the report no longer reflects the clips it claims
+  # to use. Was OFF only for the 2026-07-30 report (built on five
+  # hand-recorded clips); back ON (the normal setting) since our own
+  # automation is the thing uploading the real captures for every other
+  # day.
   use_s3_video_fallback: true
 
   temperature: 0.2
@@ -311,10 +322,13 @@ weather:
     min_days: 3              # stays off until this many days of bias history exist
     lookback_days: 10        # how far back to look for finished days
 
-# Automated Windy satellite capture. NOTE: Team 3's own feed already
-# uploads Windy videos to the same bucket roughly every 20 minutes;
-# this team's capture runs alongside it at our 7 official run times so
-# we have our own guaranteed clip at each forecast moment.
+# Automated Windy satellite capture, fired at this plant's official run
+# times so there is a guaranteed clip at every forecast moment.
+#
+# Historic note: while the project used Team 3's shared bucket, their
+# own feed also dropped clips there every ~20 minutes and ours ran
+# alongside it. Since 2026-08-09 each plant has its own bucket, so the
+# only clips a run can ever find are the ones this plant captured.
 windy_capture:
   enabled: true
   api_key: ""              # loaded from .env WINDY_API_KEY at import time (config.py), same pattern as vision.api_key. Works without a key too (public embed).
@@ -366,17 +380,25 @@ outputs:
   json: outputs/json
   extracted_frames: outputs/extracted_frames   # per-plant: three captures fire at the same minute
 
-# Team-shared AWS S3 cloud storage (set up by Team 3). Only the
-# bucket/region/paths (non-secret) live here; the access keys are
-# read from .env (AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY) and are
-# never committed.
+# AWS S3 cloud storage. Only the bucket/region/paths (non-secret) live
+# here; the access keys are read from .env (AWS_ACCESS_KEY_ID /
+# AWS_SECRET_ACCESS_KEY) and are never committed.
 storage:
   enabled: true
   provider: s3
-  # OUR OWN bucket (2026-08-03) - replaces Team 3's shared bucket so this
-  # team is no longer dependent on another team's AWS account/credentials.
-  # Same layout convention kept (inputs/.../videos/.../outputs/...) so no
-  # capture/orchestrator code needed to change, only this destination.
+  # ONE BUCKET PER PLANT (2026-08-09). This is Sirmour's; Kasipet and
+  # Bhupalpally override `bucket` in their own overlays. Until now all
+  # three shared sirmour-team2-storage and were kept apart by prefix
+  # alone, which is one typo away from three simultaneous captures
+  # writing over each other - and every capture DOES fire at the same
+  # official run time. Separate buckets make that impossible rather
+  # than merely unlikely, and let each plant's automation be given
+  # credentials for its own bucket only.
+  #
+  # The account (491429109178) and region stay shared; only the bucket
+  # splits. Prefixes below are unchanged, so a plant's objects sit at
+  # the same key in its new bucket as they did in the old shared one -
+  # the migration is a straight prefix-preserving copy.
   bucket: sirmour-team2-storage
   region: ap-south-1
   site_prefix: inputs/MadhyaPradesh/SIRMOUR

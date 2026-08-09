@@ -75,6 +75,9 @@ outputs:
   extracted_frames: outputs/plants/bhupalpally/extracted_frames
 
 storage:
+  # This plant's own bucket - see the note in kasipet.yaml. Same AWS
+  # account and region, separate bucket, unchanged prefixes.
+  bucket: bhupalpally-team2-storage
   site_prefix: inputs/Telangana/BHUPALPALLY
   video_prefix: videos/Telangana/BHUPALPALLY
   video_cache: data/plants/bhupalpally/windy/s3_cache

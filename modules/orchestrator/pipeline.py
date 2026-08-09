@@ -119,7 +119,7 @@ class Orchestrator:
 
     def pull_latest_from_cloud(self):
         """
-        Pulls the latest meter data from the team S3 bucket
+        Pulls the latest meter data from this plant's S3 bucket
         into data/historical before forecasting. Never raises
         - a cloud/network failure just leaves the local data
         as-is and logs a warning, so the forecast still runs.
@@ -148,7 +148,7 @@ class Orchestrator:
     def push_outputs_to_cloud(self, run_label, forecast_path, schedule_path):
         """
         Pushes this run's forecast and the Current Final
-        Schedule back to the team S3 bucket. Never raises - a
+        Schedule back to this plant's S3 bucket. Never raises - a
         push failure is logged but does not fail the run,
         since the outputs are already saved locally.
         """
@@ -196,10 +196,10 @@ class Orchestrator:
     def get_latest_video(self, run_time):
         """
         Path to the latest same-day Windy video at/before
-        run_time. Prefers the live S3 feed (Team 3's bucket,
-        also viewable at 13.206.205.164) when storage is on,
-        falling back to any local videos. Returns None if
-        neither has one.
+        run_time. Prefers S3 when storage is on - this plant's
+        own bucket since 2026-08-09, so the only clips it can
+        find are ones captured for this plant - falling back to
+        any local videos. Returns None if neither has one.
         """
 
         if self.auto_pull:
@@ -290,10 +290,10 @@ class Orchestrator:
         The forecast half is passed through this plant's freeze
         horizon first (modules/scheduling/effective_time.py): blocks
         inside the horizon keep the value the PREVIOUS schedule gave
-        them, because they are already declared. With
-        schedule_rules.freeze_blocks at 0 - which is what Sirmour
-        runs - this is a no-op and the schedule is built exactly as
-        it always was.
+        them, because they are already declared. Every plant now has
+        a real horizon - Sirmour 6 blocks / 90 min, the two Telangana
+        plants 3 / 45 - so this is live on all three. It is a no-op
+        only when freeze_blocks is 0 or 1.
         """
 
         today = dataframe[dataframe["timestamp"].dt.date == run_time.date()]

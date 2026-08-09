@@ -6,15 +6,16 @@ Windy Video Capture
 Records the Windy satellite-view animation for the plant
 location using a headless browser (Playwright), saves it
 locally under the <PLANT>_YYYY-MM-DD_HH-MM-SS convention
-(see name_stem) and uploads it to the team S3 bucket so the
-forecast can pull it back down.
+(see name_stem) and uploads it to that plant's S3 bucket so
+the forecast can pull it back down.
 
 Which plant it records is decided entirely by SOLAR_PLANT
 (see config/config.py): the coordinates, the local video
-folder, the S3 video prefix, the filename tag and the Windy
-API key all come from that plant's configuration. Three
-independent capture processes therefore run from this one
-file without ever touching each other's clips.
+folder, the S3 BUCKET and video prefix, the filename tag and
+the Windy API key all come from that plant's configuration.
+Three independent capture processes therefore run from this
+one file without ever touching each other's clips - they do
+not even share a bucket to collide in (2026-08-09).
 
 RELIABILITY NOTES - this module previously failed when run
 by Windows Task Scheduler ("BrowserType.launch: Executable
@@ -196,8 +197,10 @@ class WindyCapture:
         date-time regex so the forecast can locate the clip.
 
         The plant tag comes from config (plant.code) rather than a
-        constant, so each site's clips are self-identifying even
-        though all three land in one bucket.
+        constant, so each site's clips are self-identifying. Since
+        2026-08-09 they also land in three separate buckets, so the
+        tag is now a readability aid rather than the thing keeping
+        the three plants' clips apart.
         """
 
         return f"{self.plant_tag}_{run_time.strftime('%Y-%m-%d_%H-%M-%S')}"

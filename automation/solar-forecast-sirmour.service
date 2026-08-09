@@ -1,0 +1,31 @@
+[Unit]
+# Sirmour's scheduler, written in the same per-plant shape as the other two.
+#
+# The live EC2 box still runs this as `solar-forecast.service`, from before
+# there were three plants. This file is the SAME service under the per-plant
+# name - REPLACE the old unit with it, do not enable both. (Two would not
+# actually double-run: the second to start loses the race for lock port
+# 49732 and exits. But systemd would then show a unit that is "running"
+# and doing nothing, which is worse than either outcome.)
+Description=Solar Forecasting Scheduler - Sirmour (Madhya Pradesh, 5.1 MW)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/solar_forecasting_project
+
+# Sirmour is the default plant, so this line is technically redundant. It is
+# here anyway: an explicit value cannot be changed by accident from under the
+# service the way a default can, and all three units then read the same.
+Environment=SOLAR_PLANT=sirmour
+Environment=PYTHONUNBUFFERED=1
+
+ExecStart=/home/ubuntu/solar_forecasting_project/.venv/bin/python -m modules.scheduler.scheduler
+
+Restart=always
+RestartSec=30
+
+[Install]
+WantedBy=multi-user.target

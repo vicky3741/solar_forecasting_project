@@ -92,8 +92,12 @@ outputs:
   extracted_frames: outputs/plants/kasipet/extracted_frames
 
 storage:
-  # Same bucket and same AWS account as Sirmour, by request - only the
-  # prefixes differ, so all three plants stay in one place.
+  # THIS PLANT'S OWN BUCKET (2026-08-09). Same AWS account and region as
+  # Sirmour, but a separate bucket, so a capture running for Kasipet
+  # cannot reach - or be reached by - Sirmour's or Bhupalpally's data
+  # even if a prefix is ever mistyped. Prefixes are unchanged from when
+  # all three shared one bucket, so keys stay stable.
+  bucket: kasipet-team2-storage
   site_prefix: inputs/Telangana/KASIPET
   video_prefix: videos/Telangana/KASIPET
   video_cache: data/plants/kasipet/windy/s3_cache

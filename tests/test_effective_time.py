@@ -110,7 +110,10 @@ def main():
             check(f"{run_str} -> frozen {expected[0]}-{expected[1]}, "
                   f"effective {expected[2]}", got, expected)
 
-    print("\nNo freeze horizon (Sirmour's current setting) is a no-op")
+    # No plant is configured this way any more - Sirmour was, until the
+    # mentor confirmed its 6-block rule on 2026-08-09. Kept because the
+    # no-op path is what every backtest before that date ran on.
+    print("\nNo freeze horizon (freeze_blocks 0 or 1) is a no-op")
     for freeze in (0, 1):
         run_time = run_time_for("11:15")
         check(
