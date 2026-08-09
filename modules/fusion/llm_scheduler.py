@@ -70,7 +70,7 @@ from utils.logger import get_logger
 # every extra column is tokens spent and one more thing to be
 # distracted by, and these are the ones that carry the decision.
 _PROMPT_COLUMNS = [
-    "block", "time", "clearsky_power_mw", "windy_kt",
+    "block", "time", "clearsky_power_mw", "weather_kt", "windy_kt",
     "windy_clouds_pct", "windy_lclouds_pct", "windy_mclouds_pct",
     "windy_hclouds_pct", "windy_rain_mm", "windy_is_measured",
 ]
@@ -141,6 +141,15 @@ class LLMScheduler:
         clearsky = ahead["clearsky_power_mw"].to_numpy(dtype=float)
 
         kt = ahead["windy_kt"].to_numpy(dtype=float).copy()
+
+        # Where Windy has no value - every historical run, and any block
+        # between its 3-hourly steps - fall back to the ECMWF weather
+        # forecast before falling back to persistence. It is the same
+        # model Windy serves, so this is not a different opinion; it is
+        # the same opinion, available on every block.
+        if "weather_kt" in ahead.columns:
+            weather = ahead["weather_kt"].to_numpy(dtype=float)
+            kt = np.where(np.isfinite(kt), kt, weather)
 
         measured = pd.Series(dtype=float)
 
@@ -451,8 +460,15 @@ HOW TO READ THE COLUMNS
 - clearsky_power_mw: what this plant produces under a perfectly clear sky at \
 that moment. Exact physics from pvlib - solar geometry, tilt and capacity. \
 Treat it as ground truth for the SHAPE of the day.
-- windy_kt: Windy's ECMWF solar-power forecast divided by clear-sky irradiance, \
-i.e. the fraction of clear sky it expects to get through.
+- weather_kt: the ECMWF weather forecast for this location, as a fraction of \
+clear sky, already corrected for its recent measured bias at this plant. This \
+is the ONLY input that knows about weather still to come, so it should carry \
+most of the weight for blocks several hours out, where the satellite picture \
+and today's meter readings say little.
+- windy_kt: Windy's own ECMWF solar-power forecast, same fraction. It is the \
+same underlying model as weather_kt, so the two agreeing is NOT independent \
+confirmation - but the two disagreeing means one of them was sampled or \
+interpolated badly, and the disagreement itself is a warning.
 - windy_clouds_pct / lclouds / mclouds / hclouds: total, low, middle and high \
 cloud cover. Low thick cloud attenuates far more than thin high cloud, so the \
 split matters more than the total.

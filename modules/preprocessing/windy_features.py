@@ -71,6 +71,7 @@ import pandas as pd
 
 from config.config import settings
 from modules.forecasting.clearsky import ClearSkyModel
+from modules.weather.open_meteo import OpenMeteoClient
 from utils.logger import get_logger
 
 
@@ -459,6 +460,109 @@ class WindyFeatureBuilder:
 
     # --------------------------------------------------
 
+    def attach_weather(self, grid, run_time, meter):
+        """
+        Open-Meteo's ECMWF forecast as a per-block clear-sky index,
+        bias-corrected the same way the production blend does it.
+
+        WHY THIS IS HERE AT ALL, given the pipeline is meant to be
+        Windy-first: the 2026-08-09 backtest scored 8.49% overall but
+        7-20% on the 09:45 runs against 1.5-4% on the 15:45 ones. Error
+        scaled with horizon, which is the signature of having nothing
+        that knows weather is COMING - only physics, the meter, and a
+        photograph of the sky as it is now.
+
+        Windy's own solarpower IS ECMWF, so this is not a rival signal;
+        it is the same forecast from a source that also keeps an
+        ARCHIVE. That archive is what lets a historical run see the
+        weather it would really have had, which Windy can never do -
+        it serves only its current forecast. So this both fills the
+        gap and makes the backtest honest.
+
+        Worth 1.2 pts when it was added to the production blend, plus
+        0.76 for the bias correction.
+        """
+
+        weather = OpenMeteoClient()
+
+        grid["weather_ghi_w_m2"] = np.nan
+        grid["weather_kt"] = np.nan
+        grid["weather_bias_factor"] = 1.0
+
+        if not weather.enabled:
+            return grid
+
+        # TZ-NAIVE LOCAL TIME, because that is what the client works in.
+        # It unions our timestamps with its own cached hourly index and
+        # then interpolates by time; if one side is tz-aware and the
+        # other is not, the union degrades to a plain object Index and
+        # pandas refuses with "time-weighted interpolation only works on
+        # ... a DatetimeIndex". The production predictor passes naive
+        # local timestamps, so this matches it rather than changing the
+        # client under the live pipeline.
+        naive = pd.DatetimeIndex(grid["timestamp"]).tz_convert(
+            self.timezone
+        ).tz_localize(None)
+
+        as_of = pd.Timestamp(run_time)
+
+        if as_of.tz is not None:
+            as_of = as_of.tz_convert(self.timezone).tz_localize(None)
+
+        try:
+            ghi = weather.forecast_ghi_at(naive, as_of=as_of)
+        except Exception as error:
+            self.logger.warning(
+                f"Open-Meteo unavailable ({error}) - the feature table will "
+                "carry no weather forecast"
+            )
+            return grid
+
+        if ghi is None:
+            self.logger.warning(
+                "Open-Meteo returned nothing for this run - no weather columns"
+            )
+            return grid
+
+        clearsky_ghi = grid["clearsky_ghi_w_m2"].to_numpy(dtype=float)
+
+        kt = np.divide(
+            np.asarray(ghi, dtype=float),
+            clearsky_ghi,
+            out=np.full(len(grid), np.nan),
+            where=clearsky_ghi > 20,
+        )
+
+        # Walk-forward bias correction: Open-Meteo systematically
+        # over-forecast sunlight here (18 of 21 audited days), and an
+        # uncorrected optimism becomes our over-forecast. Measured from
+        # finished days only, so it carries no lookahead.
+        factor = 1.0
+
+        if meter is not None and not meter.empty:
+            try:
+                # Same naive-local convention as above; the raw meter
+                # frame is already naive local, so only run_time needs
+                # stripping.
+                factor = float(weather.bias_factor(meter, as_of))
+            except Exception as error:
+                self.logger.warning(f"Weather bias factor unavailable ({error})")
+
+        grid["weather_ghi_w_m2"] = ghi
+        grid["weather_kt"] = np.clip(kt * factor, 0.0, 1.2)
+        grid["weather_bias_factor"] = factor
+
+        usable = int(grid["weather_kt"].notna().sum())
+
+        self.logger.info(
+            f"Weather forecast attached: {usable} block(s), "
+            f"bias factor {factor:.3f}"
+        )
+
+        return grid
+
+    # --------------------------------------------------
+
     def attach_actuals(self, grid, meter, run_time):
         """
         Adds today's measured generation for blocks that have already
@@ -660,6 +764,11 @@ class WindyFeatureBuilder:
             grid = self.attach_windy(grid, payload)
 
         grid, satellite = self.attach_satellite(grid, run_time)
+
+        # Weather BEFORE actuals: the bias factor is measured from
+        # finished days in the raw meter frame, not from the columns
+        # attach_actuals adds to the grid.
+        grid = self.attach_weather(grid, run_time, meter)
 
         grid = self.attach_actuals(grid, meter, run_time)
 
