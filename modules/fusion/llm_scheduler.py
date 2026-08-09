@@ -60,6 +60,7 @@ import numpy as np
 import pandas as pd
 
 from config.config import settings
+from modules.fusion.validator import ScheduleValidator, recent_daily_bias
 from modules.scheduling.effective_time import apply_freeze, freeze_window
 from modules.vision.json_parser import JSONParser
 from utils.logger import get_logger
@@ -104,6 +105,58 @@ class LLMScheduler:
         )
 
         self.output_dir = Path(fusion.get("output_dir", "outputs/llm_schedules"))
+
+    # --------------------------------------------------
+
+    def anchor_mw(self, ahead):
+        """
+        The physics baseline each block is measured against.
+
+        Windy's own forecast clear-sky index where it exists, since
+        that is a real forward-looking number; otherwise the last
+        measured kt held flat; otherwise clear sky. Multiplied by the
+        pvlib curve, so the anchor always carries exact solar geometry
+        whatever the cloudiness estimate came from.
+
+        This is what the validator bounds the LLM against - so it has
+        to be a number we would be willing to publish on its own.
+        """
+
+        clearsky = ahead["clearsky_power_mw"].to_numpy(dtype=float)
+
+        kt = ahead["windy_kt"].to_numpy(dtype=float).copy()
+
+        if "actual_kt" in ahead.columns:
+            fallback = float(
+                pd.Series(ahead["actual_kt"]).dropna().tail(4).mean()
+            ) if ahead["actual_kt"].notna().any() else np.nan
+        else:
+            fallback = np.nan
+
+        if not np.isfinite(fallback):
+            fallback = 1.0
+
+        kt = np.where(np.isfinite(kt), kt, fallback)
+
+        return np.clip(kt * clearsky, 0.0, self.capacity_mw)
+
+    # --------------------------------------------------
+
+    def deviation_limit(self, run_time):
+        """
+        How far the model may stray from the anchor on this run - wider
+        when recent finished days were consistently biased one way (see
+        modules/fusion/validator.py).
+        """
+
+        try:
+            bias = recent_daily_bias(
+                self.output_dir, as_of=pd.Timestamp(run_time).date()
+            )
+        except Exception:
+            bias = []
+
+        return self.validator.suggested_max_deviation_fraction(bias)
 
     # --------------------------------------------------
 
@@ -511,9 +564,18 @@ the {count} blocks from {first_block} to {last_block}, in order, with no gaps.\
             "time": ahead["time"].to_numpy(),
             "clearsky_power_mw": ahead["clearsky_power_mw"].to_numpy(),
             "windy_kt": ahead["windy_kt"].to_numpy(),
+            "anchor_mw": self.anchor_mw(ahead),
             "llm_kt": kt,
             "forecast_mw": power,
         })
+
+        # Guard rails BEFORE the freeze horizon. Freezing republishes
+        # values already sent to the grid operator, and those were
+        # validated when they were first published - re-validating them
+        # against today's anchor would rewrite a committed block.
+        schedule, validator_notes = self.validator.validate(
+            schedule, max_deviation_fraction=self.deviation_limit(run_time)
+        )
 
         schedule, frozen = self.apply_freeze_horizon(schedule, run_time, previous)
 
@@ -522,6 +584,8 @@ the {count} blocks from {first_block} to {last_block}, in order, with no gaps.\
             "confidence": payload.get("confidence"),
             "reasoning": payload.get("reasoning"),
             "frozen_blocks": len(frozen),
+            "adjusted_blocks": int(schedule["was_adjusted"].sum()),
+            "validator_notes": validator_notes,
             "model": settings["vision"]["model"],
         })
 

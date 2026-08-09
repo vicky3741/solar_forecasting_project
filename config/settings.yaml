@@ -390,6 +390,28 @@ fusion:
   max_output_tokens: 8192
   output_dir: outputs/llm_schedules
 
+  # Deterministic guard rails on whatever the LLM returns, adopted from
+  # Kushal's Windy-Project-3 (modules/fusion/validator.py). We had NONE,
+  # and the evidence says we need them: on the first live run the model
+  # replaced Windy's kt of 0.88 with 0.20 - a 4x cut - off one rain
+  # figure, and nothing in the pipeline could question it.
+  validator:
+    enabled: true
+    # How far a block may sit from the physics anchor. Their
+    # MAX_DEVIATION_FRACTION. The model keeps its judgement; it just
+    # cannot quarter a block on a hunch.
+    max_deviation_fraction: 0.40
+    # Largest change between consecutive 15-min blocks, as a fraction of
+    # capacity (their MAX_STEP_CHANGE_MW = capacity * 0.35). A fraction
+    # rather than MW so it carries to Kasipet and Bhupalpally unchanged.
+    max_step_fraction: 0.35
+    # When several finished days in a row are biased the SAME way, the
+    # anchor itself is wrong, and holding the model tight to a wrong
+    # anchor just copies its error - so the cap widens.
+    consistent_bias_days: 3
+    widened_deviation: 0.80          # 3+ consistent days
+    partly_widened_deviation: 0.60   # 2 consistent days
+
 paths:
   raw_data: data/raw
   processed_data: data/processed

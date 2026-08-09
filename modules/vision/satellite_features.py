@@ -67,36 +67,94 @@ made the reference log useless.
 =========================================================
 """
 
+import math
 from pathlib import Path
 
 import cv2
 import numpy as np
 
+from config.config import settings
 from modules.vision.optical_flow import OpticalFlowAnalyzer
 from utils.logger import get_logger
 
 
 class SatelliteFeatureExtractor:
 
+    # Web-Mercator ground resolution at zoom 0, metres per pixel.
+    _METRES_PER_PIXEL_Z0 = 156543.03392
+
+    @classmethod
+    def roi_fraction_for_km(cls, box_km, zoom, latitude, frame_width=1280):
+        """
+        The centre-crop fraction that measures a box of `box_km` across
+        the ground, given the map zoom and the plant's latitude.
+
+        WHY THIS EXISTS - the scale mismatch is the whole problem.
+        We record Windy at zoom 8, where one pixel is ~556 m at
+        Sirmour, so a 1280-pixel frame spans ~712 km and even a 60%
+        centre crop covers ~427 km. Cloud 200 km away does not shade
+        this plant in the next 15 minutes, so averaging it in buries
+        the local sky in irrelevant weather - which is what the
+        2026-08-09 walk-forward measured: the model LOST to persistence
+        at <= 1h (10.00% vs 9.18%) and only won at 2-4h, the exact
+        opposite of how a sky picture should behave.
+
+        Kushal's Windy-Project-3 records at ZOOM_LEVEL = 11 - eight
+        times closer, ~69.5 m per pixel, a ~111 km frame - and crops a
+        box around the plant from that.
+        """
+
+        metres_per_pixel = (
+            cls._METRES_PER_PIXEL_Z0
+            * math.cos(math.radians(latitude))
+            / (2 ** zoom)
+        )
+
+        pixels = (box_km * 1000.0) / metres_per_pixel
+
+        # Farneback needs a usable patch; below ~48 px the flow field is
+        # mostly window artefacts. Clamped rather than silently tiny.
+        fraction = pixels / frame_width
+
+        return float(np.clip(fraction, 48.0 / frame_width, 1.0))
+
     def __init__(
         self,
-        roi_fraction=0.6,
+        roi_fraction=None,
+        roi_km=None,
+        zoom=None,
+        latitude=None,
         thin_cloud_threshold=110,
         thick_cloud_threshold=175,
         max_frames=24,
     ):
         """
-        roi_fraction : centre crop actually measured. 0.6 follows
-            Abhijit's extractor; the map edges carry Windy's timeline,
-            legend and logo, which are static UI and would otherwise
-            be counted as permanently clear sky.
+        roi_km       : size of the ground box actually measured, in km.
+            Preferred over roi_fraction, because it means the same
+            thing whatever zoom the clip was recorded at. When set, it
+            overrides roi_fraction.
+        roi_fraction : raw centre-crop fraction, used when roi_km is
+            not given. 0.6 follows Abhijit's extractor.
         thin/thick   : brightness cut points separating clear sky from
             thin cloud from thick cloud.
         """
 
         self.logger = get_logger()
 
-        self.roi_fraction = roi_fraction
+        if roi_km is not None:
+
+            plant = settings["plant"]
+
+            zoom = zoom if zoom is not None else settings.get(
+                "windy_capture", {}
+            ).get("zoom", 8)
+
+            latitude = latitude if latitude is not None else plant["latitude"]
+
+            roi_fraction = self.roi_fraction_for_km(roi_km, zoom, latitude)
+
+        self.roi_km = roi_km
+        self.roi_fraction = roi_fraction if roi_fraction is not None else 0.6
         self.thin_threshold = thin_cloud_threshold
         self.thick_threshold = thick_cloud_threshold
 
@@ -106,7 +164,7 @@ class SatelliteFeatureExtractor:
         # OOM kill on the ~900 MB EC2 box (2026-07-26, a 30 s clip
         # needed ~2 GB when full-colour frames were buffered first).
         self.reader = OpticalFlowAnalyzer(
-            roi_fraction=roi_fraction,
+            roi_fraction=self.roi_fraction,
             cloud_brightness_threshold=thin_cloud_threshold,
             max_frames=max_frames,
         )

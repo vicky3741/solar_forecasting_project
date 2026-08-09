@@ -75,10 +75,27 @@ def feature_columns(frame):
     ]
 
 
-def walk_forward(frame, features, min_train_days=4, params=None):
+def walk_forward(frame, features, min_train_days=4, params=None,
+                 target="residual"):
     """
     Train on every earlier day, predict the next. Returns per-day
     results and the out-of-sample predictions.
+
+    target="kt"       : learn the clear-sky index directly.
+    target="residual" : learn (target_kt - kt_now), and add it back to
+                        kt_now at predict time.
+
+    Residual is the default and it is not a detail. When the baseline
+    to beat is persistence, predicting kt directly makes the model
+    spend its capacity re-deriving persistence from pixels - and any
+    error in that re-derivation is subtracted straight from the
+    baseline it is trying to beat. Predicting the residual hands it
+    persistence for free and asks the only question the satellite can
+    actually answer: how is the sky about to CHANGE?
+
+    Measured on 2026-08-09 (21 days, walk-forward): direct kt scored
+    11.34% against persistence 11.26% - i.e. it gave back everything
+    it learned.
     """
 
     params = params or {
@@ -115,26 +132,78 @@ def walk_forward(frame, features, min_train_days=4, params=None):
         if train.empty or test.empty:
             continue
 
-        model = lgb.train(
-            params,
-            lgb.Dataset(train[features], label=train["target_kt"]),
-            num_boost_round=250,
-        )
-
-        predicted_kt = np.clip(model.predict(test[features]), 0.0, 1.2)
-
-        clearsky = test["clearsky_mw"].to_numpy()
-        actual = test["actual_mw"].to_numpy()
-
-        model_mw = np.clip(predicted_kt * clearsky, 0, CAPACITY_MW)
-
         # Persistence uses the same kt_now the model was given, so the
         # comparison is like for like - both know what the meter last
         # said, and only the model also sees the sky.
         kt_now = test["kt_now"].to_numpy(dtype=float)
         kt_now = np.where(np.isnan(kt_now), 1.0, kt_now)
 
+        # kt_climate is the recent average sky, taken from the TRAINING
+        # days only so it carries no lookahead. Defined here because
+        # both the damped baseline and the residual_damped target need
+        # it before the model is fitted.
+        kt_climate = float(train["target_kt"].mean())
+
+        # The damped curve for the TRAINING rows too, so a model can be
+        # asked to improve on it rather than on flat persistence. Both
+        # sides use the same kt_climate, which is in-sample for the
+        # training rows and strictly out-of-sample for the test day -
+        # and the test day is the only thing scored.
+        train_weight = np.exp(-train["horizon_min"].to_numpy(dtype=float) / 120.0)
+        train_damped = (
+            train["kt_now"].to_numpy(dtype=float) * train_weight
+            + kt_climate * (1 - train_weight)
+        )
+
+        horizon = test["horizon_min"].to_numpy(dtype=float)
+        weight = np.exp(-horizon / 120.0)
+        damped_kt = kt_now * weight + kt_climate * (1 - weight)
+
+        if target == "residual":
+            train_label = train["target_kt"] - train["kt_now"]
+        elif target == "residual_damped":
+            train_label = train["target_kt"].to_numpy(dtype=float) - train_damped
+        else:
+            train_label = train["target_kt"]
+
+        model = lgb.train(
+            params,
+            lgb.Dataset(train[features], label=train_label),
+            num_boost_round=250,
+        )
+
+        raw = model.predict(test[features])
+
+        if target == "residual":
+            predicted_kt = np.clip(kt_now + raw, 0.0, 1.2)
+        elif target == "residual_damped":
+            predicted_kt = np.clip(damped_kt + raw, 0.0, 1.2)
+        else:
+            predicted_kt = np.clip(raw, 0.0, 1.2)
+
+        clearsky = test["clearsky_mw"].to_numpy()
+        actual = test["actual_mw"].to_numpy()
+
+        model_mw = np.clip(predicted_kt * clearsky, 0, CAPACITY_MW)
+
         persistence_mw = np.clip(kt_now * clearsky, 0, CAPACITY_MW)
+
+        # DAMPED PERSISTENCE - the baseline that decides whether the
+        # satellite is doing anything. Decay kt_now toward the recent
+        # average sky as the horizon grows:
+        #
+        #     kt = kt_now * exp(-h/tau) + kt_climate * (1 - exp(-h/tau))
+        #
+        # It uses no video, no pixels, no model - only the meter and a
+        # clock. Plain persistence degrades badly over hours, so ANY
+        # method that drifts toward average will beat it far out. If
+        # this baseline matches the LightGBM model, then the model's
+        # long-horizon win is mean reversion rather than sky-reading,
+        # and the satellite features are decoration.
+        #
+        # MEASURED 2026-08-09: it does not merely match - it WINS.
+        # 9.80% against the best video model's 10.69% (35 km box).
+        damped_mw = np.clip(damped_kt * clearsky, 0, CAPACITY_MW)
 
         rows.append({
             "day": day,
@@ -142,6 +211,7 @@ def walk_forward(frame, features, min_train_days=4, params=None):
             "rows": len(test),
             "model_pct": deviation_pct(model_mw, actual),
             "persistence_pct": deviation_pct(persistence_mw, actual),
+            "damped_pct": deviation_pct(damped_mw, actual),
             "clearsky_pct": deviation_pct(clearsky, actual),
         })
 
@@ -149,6 +219,8 @@ def walk_forward(frame, features, min_train_days=4, params=None):
         result["predicted_kt"] = predicted_kt
         result["target_kt"] = test["target_kt"].to_numpy()
         result["model_mw"] = model_mw
+        result["persistence_mw"] = persistence_mw
+        result["damped_mw"] = damped_mw
         result["actual_mw"] = actual
         predictions.append(result)
 
@@ -160,23 +232,89 @@ def walk_forward(frame, features, min_train_days=4, params=None):
 
 def by_horizon(predictions):
     """
-    Error by how far ahead the prediction was. A satellite clip should
-    help most in the next hour and fade after that; if it does not,
-    the model is leaning on the clock rather than the sky.
+    Model AND persistence error by how far ahead the prediction was.
+
+    This is the test that matters for a satellite clip. A picture of
+    the sky should beat persistence in the next half hour, where cloud
+    that is visibly arriving has not arrived yet, and lose to it hours
+    out, where the picture is stale. A flat curve means the features
+    are not carrying near-term information at all.
+
+    Both series are shown because "model error rises with horizon" is
+    not evidence on its own - EVERY forecast gets worse with horizon.
+    The question is whether the GAP to persistence changes.
     """
 
     if predictions.empty:
         return pd.DataFrame()
 
     predictions = predictions.copy()
-    predictions["abs_error_mw"] = (
+
+    predictions["model_err"] = (
         predictions["model_mw"] - predictions["actual_mw"]
     ).abs()
+    predictions["persist_err"] = (
+        predictions["persistence_mw"] - predictions["actual_mw"]
+    ).abs()
 
-    return predictions.groupby("horizon_min").agg(
-        rows=("abs_error_mw", "size"),
-        mean_abs_error_mw=("abs_error_mw", "mean"),
+    grouped = predictions.groupby("horizon_min").agg(
+        rows=("model_err", "size"),
+        model_mw=("model_err", "mean"),
+        persistence_mw=("persist_err", "mean"),
     ).reset_index()
+
+    grouped["gain_mw"] = grouped["persistence_mw"] - grouped["model_mw"]
+
+    return grouped
+
+
+def by_horizon_band(predictions, capacity_mw):
+    """
+    The same comparison collapsed into bands, as % of capacity, so it
+    can be read against every other number in this project.
+    """
+
+    if predictions.empty:
+        return pd.DataFrame()
+
+    predictions = predictions.copy()
+
+    bands = [(0, 60, "<= 1h"), (60, 120, "1-2h"),
+             (120, 240, "2-4h"), (0, 240, "ALL")]
+
+    rows = []
+
+    for low, high, label in bands:
+
+        window = predictions[
+            (predictions["horizon_min"] > (low if label != "<= 1h" else -1))
+            & (predictions["horizon_min"] <= high)
+        ]
+
+        if window.empty:
+            continue
+
+        def error(column):
+            return np.mean(
+                np.abs(window[column] - window["actual_mw"])
+            ) / capacity_mw * 100
+
+        model = error("model_mw")
+        damped = error("damped_mw")
+
+        rows.append({
+            "band": label,
+            "rows": len(window),
+            "model_pct": model,
+            "persistence_pct": error("persistence_mw"),
+            "damped_pct": damped,
+            # Against the damped baseline, not plain persistence. This
+            # is the number that says whether the VIDEO earned its
+            # place: damped uses the meter and a clock and nothing else.
+            "video_gain_pts": damped - model,
+        })
+
+    return pd.DataFrame(rows)
 
 
 def main():
@@ -199,74 +337,128 @@ def main():
 
     frame = pd.read_csv(path, parse_dates=["captured_at", "target_time"])
 
+    # Residual training needs kt_now, and a row without it cannot be
+    # compared against persistence either - dropping them keeps both
+    # sides of the comparison on identical rows.
+    before = len(frame)
+    frame = frame[frame["kt_now"].notna()].reset_index(drop=True)
+
     features = feature_columns(frame)
 
     print("=" * 78)
     print("SATELLITE -> CLEAR-SKY-INDEX MODEL (LightGBM, walk-forward by day)")
     print("=" * 78)
-    print(f"rows     : {len(frame)}")
+    print(f"rows     : {len(frame)} (dropped {before - len(frame)} without kt_now)")
     print(f"days     : {frame['day'].nunique()}")
     print(f"features : {len(features)}")
     print()
 
-    results, predictions = walk_forward(
-        frame, features, min_train_days=args.min_train_days
-    )
+    runs = {}
 
-    if results.empty:
-        raise SystemExit(
-            "Not enough days to walk forward. Collect more clips."
+    for target in ("kt", "residual"):
+
+        results, predictions = walk_forward(
+            frame, features,
+            min_train_days=args.min_train_days,
+            target=target,
         )
 
-    print(results.to_string(index=False, float_format="%.2f"))
+        if results.empty:
+            raise SystemExit(
+                "Not enough days to walk forward. Collect more clips."
+            )
+
+        runs[target] = (results, predictions)
+
+    print("Per-day deviation (% of capacity, lower is better)")
     print("-" * 78)
-    print(f"{'MEAN':<12} {'':>12} {'':>6} "
-          f"{results['model_pct'].mean():10.2f} "
-          f"{results['persistence_pct'].mean():16.2f} "
-          f"{results['clearsky_pct'].mean():13.2f}")
+
+    table = runs["residual"][0][["day", "rows"]].copy()
+    table["direct_kt"] = runs["kt"][0]["model_pct"].to_numpy()
+    table["residual"] = runs["residual"][0]["model_pct"].to_numpy()
+    table["persistence"] = runs["residual"][0]["persistence_pct"].to_numpy()
+    table["damped"] = runs["residual"][0]["damped_pct"].to_numpy()
+
+    print(table.to_string(index=False, float_format="%.2f"))
+    print("-" * 78)
+    print(f"{'MEAN':<22} "
+          f"{table['direct_kt'].mean():9.2f} "
+          f"{table['residual'].mean():9.2f} "
+          f"{table['persistence'].mean():12.2f} "
+          f"{table['damped'].mean():7.2f}")
+
+    print()
+
+    for target in ("kt", "residual"):
+
+        results = runs[target][0]
+
+        beat = int((results["model_pct"] < results["persistence_pct"]).sum())
+        gain = results["persistence_pct"].mean() - results["model_pct"].mean()
+
+        print(f"  {target:<9} beat persistence on {beat}/{len(results)} days "
+              f"({gain:+.2f} pts)")
+
+    results, predictions = runs["residual"]
 
     beat = int((results["model_pct"] < results["persistence_pct"]).sum())
     delta = results["persistence_pct"].mean() - results["model_pct"].mean()
 
-    print()
-    print(f"Model beat persistence on {beat} of {len(results)} unseen days "
-          f"({delta:+.2f} pts on average).")
-
     horizons = by_horizon(predictions)
 
     if not horizons.empty:
-        print("\nError by horizon:")
+        print("\nMean absolute error by horizon, MW (residual model):")
         print(horizons.to_string(index=False, float_format="%.3f"))
+
+    bands = by_horizon_band(predictions, CAPACITY_MW)
+
+    if not bands.empty:
+        print("\nBy horizon band (% of capacity):")
+        print(bands.to_string(index=False, float_format="%.2f"))
+
+    # Always shown, win or lose. When the model does NOT help, which
+    # features it leaned on is the diagnosis - if kt_now dominates and
+    # the sat_* features contribute almost nothing, the satellite is
+    # not carrying signal, rather than the model failing to use it.
+    diagnostic = lgb.train(
+        {
+            "objective": "regression", "metric": "l1",
+            "learning_rate": 0.05, "num_leaves": 15,
+            "min_data_in_leaf": 40, "feature_fraction": 0.8,
+            "bagging_fraction": 0.8, "bagging_freq": 1,
+            "lambda_l2": 1.0, "verbose": -1, "num_threads": 2,
+        },
+        lgb.Dataset(frame[features], label=frame["target_kt"] - frame["kt_now"]),
+        num_boost_round=250,
+    )
+
+    importance = pd.DataFrame({
+        "feature": features,
+        "gain": diagnostic.feature_importance("gain"),
+    }).sort_values("gain", ascending=False)
+
+    importance["share_pct"] = (
+        importance["gain"] / importance["gain"].sum() * 100
+    )
+
+    print("\nWhat the residual model leans on (gain share):")
+    print(importance.head(12).to_string(index=False, float_format="%.1f"))
+
+    sat_share = importance.loc[
+        importance["feature"].str.startswith("sat_"), "share_pct"
+    ].sum()
+
+    print(f"\n  satellite features together: {sat_share:.1f}% of gain")
 
     if delta > 0 and beat > len(results) / 2:
         print("\nVERDICT: the satellite features are adding something. Retrain "
               "on all days\n         and wire it in behind a config switch, "
               "then re-score.")
 
-        model = lgb.train(
-            {
-                "objective": "regression", "metric": "l1",
-                "learning_rate": 0.05, "num_leaves": 15,
-                "min_data_in_leaf": 40, "feature_fraction": 0.8,
-                "bagging_fraction": 0.8, "bagging_freq": 1,
-                "lambda_l2": 1.0, "verbose": -1, "num_threads": 2,
-            },
-            lgb.Dataset(frame[features], label=frame["target_kt"]),
-            num_boost_round=250,
-        )
-
         MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
-        model.save_model(str(MODEL_PATH))
+        diagnostic.save_model(str(MODEL_PATH))
 
-        print(f"         Saved: {MODEL_PATH}")
-
-        importance = pd.DataFrame({
-            "feature": features,
-            "gain": model.feature_importance("gain"),
-        }).sort_values("gain", ascending=False).head(12)
-
-        print("\nWhat the model actually used:")
-        print(importance.to_string(index=False, float_format="%.1f"))
+        print(f"\n         Saved: {MODEL_PATH} (residual model, trained on all days)")
 
     else:
         print("\nVERDICT: not better than holding the last measured "

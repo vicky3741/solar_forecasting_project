@@ -1,0 +1,19 @@
+{
+  "sat_video": "20260715T054125Z_733985759da8_SIRMOUR_satellite_2026-07-14_09-31-55_clean.mp4",
+  "sat_frames_used": 24,
+  "sat_brightness_mean": 97.31,
+  "sat_brightness_std": 1.18,
+  "sat_contrast": 28.89,
+  "sat_clear_pct": 94.35,
+  "sat_thin_cloud_pct": 1.77,
+  "sat_thick_cloud_pct": 3.88,
+  "sat_entropy": 3.256,
+  "sat_north_cloud_pct": 9.97,
+  "sat_south_cloud_pct": 2.33,
+  "sat_west_cloud_pct": 10.31,
+  "sat_east_cloud_pct": 1.94,
+  "sat_cloud_trend_pct": 0.68,
+  "sat_flow_divergence": -2.8e-05,
+  "sat_flow_vorticity": 0.002748,
+  "sat_flow_kinetic_energy": 0.000272
+}

@@ -1,0 +1,19 @@
+{
+  "sat_video": "SIRMOUR_2026-07-23_10-57-00.webm",
+  "sat_frames_used": 24,
+  "sat_brightness_mean": 162.03,
+  "sat_brightness_std": 39.92,
+  "sat_contrast": 39.51,
+  "sat_clear_pct": 14.71,
+  "sat_thin_cloud_pct": 42.58,
+  "sat_thick_cloud_pct": 42.71,
+  "sat_entropy": 6.391,
+  "sat_north_cloud_pct": 81.0,
+  "sat_south_cloud_pct": 91.7,
+  "sat_west_cloud_pct": 91.71,
+  "sat_east_cloud_pct": 81.06,
+  "sat_cloud_trend_pct": 3.01,
+  "sat_flow_divergence": -0.000156,
+  "sat_flow_vorticity": 0.093773,
+  "sat_flow_kinetic_energy": 1.699963
+}
