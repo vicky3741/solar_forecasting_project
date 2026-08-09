@@ -68,14 +68,22 @@ schedule_rules:
   # engine block (the block the run fires in) inclusive. The guide sets
   # Sirmour to 6 blocks / 90 min and Kasipet-Kothagudem to 3 / 45 min.
   #
-  # KEPT AT 0 FOR SIRMOUR ON PURPOSE. Sirmour has been publishing with
-  # no freeze horizon since the pipeline was built, every tuned constant
-  # in this file was validated against that behaviour, and the user's
-  # instruction with the new plants was explicitly not to disturb the
-  # running Sirmour automation. Raise this to 6 (one line) once the
-  # change has been agreed and re-backtested - the machinery is built
-  # and already live on the other two plants.
-  freeze_blocks: 0
+  # SIRMOUR IS NOW 6, agreed with the user 2026-08-09 after reading the
+  # mentor's "Simple Effective Time Schedule Guide" (Vedanjay/New
+  # Plants/). The guide is explicit and gives the full table:
+  #
+  #     generated 11:15 -> engine block 46 -> freeze 46-51
+  #                     -> new schedule starts block 52 (12:45)
+  #
+  # Until now Sirmour published with freeze_blocks: 0, which rewrote
+  # blocks already declared to the grid operator. That is a compliance
+  # problem, not only an accuracy one.
+  #
+  # CONSEQUENCE FOR OLD NUMBERS: every tuned constant in this file was
+  # validated with no freeze horizon, so deviation figures measured
+  # before this change are on a different basis and are not directly
+  # comparable to anything measured after it.
+  freeze_blocks: 6
 
 # Enercast is a reference schedule shown side by side, never a training
 # input (mentor brief). Only Sirmour has an Enercast feed.
