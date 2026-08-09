@@ -84,6 +84,12 @@ class LLMScheduler:
 
         self.parser = JSONParser()
 
+        self.validator = ScheduleValidator()
+
+        from modules.fusion.case_retrieval import CaseRetriever
+
+        self.cases = CaseRetriever()
+
         plant = settings["plant"]
 
         self.plant_name = plant.get("name", "the plant")
@@ -317,6 +323,59 @@ cloud DIRECTION is not measurable from it and is not reported."""
 
     # --------------------------------------------------
 
+    def precedent_section(self, features, ahead, run_time):
+        """
+        What actually happened the last several times conditions looked
+        like this (modules/fusion/case_retrieval.py).
+
+        Sampled at three horizons rather than all of them - drift from
+        forecast to outcome depends mostly on how far ahead the call
+        was made, and three points show that shape without spending
+        tokens on thirty near-identical summaries.
+        """
+
+        if not self.cases.available:
+            return "(no past cases available)"
+
+        past = features[
+            (features["is_past"] == 1) & features["actual_kt"].notna()
+        ]
+
+        kt_now = (
+            float(past["actual_kt"].tail(4).mean()) if not past.empty
+            else float(pd.Series(ahead["windy_kt"]).dropna().head(1).mean())
+            if ahead["windy_kt"].notna().any() else 1.0
+        )
+
+        minutes = (
+            (ahead["timestamp"] - run_time).dt.total_seconds() / 60
+        ).to_numpy()
+
+        horizons = {}
+
+        for target in (30, 90, 180):
+
+            index = int(np.argmin(np.abs(minutes - target)))
+
+            # Skip a horizon the remaining day cannot reach - late runs
+            # have no block 3 hours out, and pretending otherwise would
+            # quote precedent for a block that does not exist.
+            if abs(minutes[index] - target) > 60:
+                continue
+
+            horizons[int(round(minutes[index]))] = float(
+                ahead["clearsky_power_mw"].iloc[index] * kt_now * 1000
+            )
+
+        if not horizons:
+            return "(no past cases matched this situation)"
+
+        return self.cases.prompt_section(
+            kt_now, horizons, exclude_date=pd.Timestamp(run_time).date()
+        )
+
+    # --------------------------------------------------
+
     def build_prompt(self, features, run_time, ahead, satellite=None):
 
         table, _ = self.forecast_table(features, run_time)
@@ -324,6 +383,8 @@ cloud DIRECTION is not measurable from it and is not reported."""
         history = self.recent_history(features)
 
         sky = self.satellite_section(satellite, run_time)
+
+        precedent = self.precedent_section(features, ahead, run_time)
 
         # Counted over the blocks actually IN the table, not over every
         # remaining block of the day. Windy's 3-hourly steps land at
@@ -354,6 +415,9 @@ WHAT THE PLANT HAS ACTUALLY GENERATED TODAY SO FAR
 
 CURRENT SKY OBSERVATION (satellite)
 {sky}
+
+WHAT HAPPENED IN SIMILAR SITUATIONS BEFORE
+{precedent}
 
 BLOCKS STILL TO SCHEDULE ({count} blocks, {first_block} to {last_block})
 {table}

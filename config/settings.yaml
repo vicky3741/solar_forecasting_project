@@ -412,6 +412,26 @@ fusion:
     widened_deviation: 0.80          # 3+ consistent days
     partly_widened_deviation: 0.60   # 2 consistent days
 
+# Team 1's capture, ported (modules/capture/windy_capture_k1.py). SEPARATE
+# from windy_capture above on purpose: that one feeds the live Sirmour
+# automation and its Gemini vision signal was tuned on zoom-8 embed clips,
+# so changing it would silently alter what production sees.
+#
+# The substantive difference is ZOOM. At zoom 8 a frame spans ~712 km of
+# northern India; at zoom 11 it spans ~111 km - the weather that can
+# actually reach the plant inside a forecast block.
+#
+# NOTE: www.windy.com serves premium-only overlays, so this needs the
+# session file from `python -m modules.capture.windy_login`. Without it the
+# capture still runs but premium layers may come back empty.
+windy_capture_k1:
+  enabled: false           # opt-in; nothing schedules this yet
+  zoom: 11
+  layers: [satellite, wind, solarpower, clouds, rain]
+  record_seconds: 8
+  screenshot_dir: data/windy/k1_screenshots
+  video_dir: data/windy/k1_videos
+
 paths:
   raw_data: data/raw
   processed_data: data/processed
