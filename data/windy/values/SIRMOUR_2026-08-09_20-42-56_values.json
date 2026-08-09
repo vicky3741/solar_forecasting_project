@@ -1,0 +1,1100 @@
+{
+  "plant": "SIRMOUR",
+  "latitude": 24.56253056,
+  "longitude": 75.09140278,
+  "scraped_at": "2026-08-09T20:42:56.585297",
+  "layers": {
+    "solarpower": {
+      "overlay": "solarpower",
+      "product": "ecmwf",
+      "provider_ref_time": null,
+      "provider_updated": null,
+      "step_minutes": 60,
+      "total_steps_available": 143,
+      "premium": true,
+      "stale": false,
+      "readings": [
+        {
+          "timestamp": "2026-08-09T07:00:00Z",
+          "value": 779.0,
+          "unit": "W/m\u00b2",
+          "direction": null,
+          "raw": null,
+          "path": null,
+          "settled": true
+        },
+        {
+          "timestamp": "2026-08-09T08:00:00Z",
+          "value": 506.0,
+          "unit": "W/m\u00b2",
+          "direction": null,
+          "raw": null,
+          "path": null,
+          "settled": true
+        },
+        {
+          "timestamp": "2026-08-09T09:00:00Z",
+          "value": 484.0,
+          "unit": "W/m\u00b2",
+          "direction": null,
+          "raw": null,
+          "path": null,
+          "settled": true
+        },
+        {
+          "timestamp": "2026-08-09T10:00:00Z",
+          "value": 435.0,
+          "unit": "W/m\u00b2",
+          "direction": null,
+          "raw": null,
+          "path": null,
+          "settled": true
+        },
+        {
+          "timestamp": "2026-08-09T11:00:00Z",
+          "value": null,
+          "unit": "",
+          "direction": null,
+          "raw": null,
+          "path": null,
+          "settled": false
+        },
+        {
+          "timestamp": "2026-08-09T12:00:00Z",
+          "value": null,
+          "unit": "",
+          "direction": null,
+          "raw": null,
+          "path": null,
+          "settled": false
+        },
+        {
+          "timestamp": "2026-08-09T13:00:00Z",
+          "value": 102.0,
+          "unit": "W/m\u00b2",
+          "direction": null,
+          "raw": null,
+          "path": null,
+          "settled": true
+        },
+        {
+          "timestamp": "2026-08-09T14:00:00Z",
+          "value": 12.0,
+          "unit": "W/m\u00b2",
+          "direction": null,
+          "raw": null,
+          "path": null,
+          "settled": true
+        },
+        {
+          "timestamp": "2026-08-09T15:00:00Z",
+          "value": null,
+          "unit": "",
+          "direction": null,
+          "raw": null,
+          "path": null,
+          "settled": false
+        },
+        {
+          "timestamp": "2026-08-09T16:00:00Z",
+          "value": 0.0,
+          "unit": "W/m\u00b2",
+          "direction": null,
+          "raw": null,
+          "path": null,
+          "settled": true
+        },
+        {
+          "timestamp": "2026-08-09T17:00:00Z",
+          "value": null,
+          "unit": "",
+          "direction": null,
+          "raw": null,
+          "path": null,
+          "settled": false
+        },
+        {
+          "timestamp": "2026-08-09T18:00:00Z",
+          "value": null,
+          "unit": "",
+          "direction": null,
+          "raw": null,
+          "path": null,
+          "settled": false
+        },
+        {
+          "timestamp": "2026-08-09T19:00:00Z",
+          "value": null,
+          "unit": "",
+          "direction": null,
+          "raw": null,
+          "path": null,
+          "settled": false
+        },
+        {
+          "timestamp": "2026-08-09T20:00:00Z",
+          "value": null,
+          "unit": "",
+          "direction": null,
+          "raw": null,
+          "path": null,
+          "settled": false
+        },
+        {
+          "timestamp": "2026-08-09T21:00:00Z",
+          "value": 0.0,
+          "unit": "W/m\u00b2",
+          "direction": null,
+          "raw": null,
+          "path": null,
+          "settled": true
+        },
+        {
+          "timestamp": "2026-08-09T22:00:00Z",
+          "value": 0.0,
+          "unit": "W/m\u00b2",
+          "direction": null,
+          "raw": null,
+          "path": null,
+          "settled": true
+        }
+      ]
+    },
+    "clouds": {
+      "overlay": "clouds",
+      "product": "ecmwf",
+      "provider_ref_time": null,
+      "provider_updated": null,
+      "step_minutes": 60,
+      "total_steps_available": 143,
+      "premium": true,
+      "stale": true,
+      "readings": [
+        {
+          "timestamp": "2026-08-09T07:00:00Z",
+          "value": null,
+          "unit": "",
+          "direction": null,
+          "raw": null,
+          "path": null,
+          "settled": false
+        },
+        {
+          "timestamp": "2026-08-09T08:00:00Z",
+          "value": null,
+          "unit": "",
+          "direction": null,
+          "raw": null,
+          "path": null,
+          "settled": false
+        },
+        {
+          "timestamp": "2026-08-09T09:00:00Z",
+          "value": null,
+          "unit": "",
+          "direction": null,
+          "raw": null,
+          "path": null,
+          "settled": false
+        },
+        {
+          "timestamp": "2026-08-09T10:00:00Z",
+          "value": null,
+          "unit": "",
+          "direction": null,
+          "raw": null,
+          "path": null,
+          "settled": false
+        },
+        {
+          "timestamp": "2026-08-09T11:00:00Z",
+          "value": null,
+          "unit": "",
+          "direction": null,
+          "raw": null,
+          "path": null,
+          "settled": false
+        },
+        {
+          "timestamp": "2026-08-09T12:00:00Z",
+          "value": null,
+          "unit": "",
+          "direction": null,
+          "raw": null,
+          "path": null,
+          "settled": false
+        },
+        {
+          "timestamp": "2026-08-09T13:00:00Z",
+          "value": null,
+          "unit": "",
+          "direction": null,
+          "raw": null,
+          "path": null,
+          "settled": false
+        },
+        {
+          "timestamp": "2026-08-09T14:00:00Z",
+          "value": null,
+          "unit": "",
+          "direction": null,
+          "raw": null,
+          "path": null,
+          "settled": false
+        },
+        {
+          "timestamp": "2026-08-09T15:00:00Z",
+          "value": null,
+          "unit": "",
+          "direction": null,
+          "raw": null,
+          "path": null,
+          "settled": false
+        },
+        {
+          "timestamp": "2026-08-09T16:00:00Z",
+          "value": null,
+          "unit": "",
+          "direction": null,
+          "raw": null,
+          "path": null,
+          "settled": false
+        },
+        {
+          "timestamp": "2026-08-09T17:00:00Z",
+          "value": null,
+          "unit": "",
+          "direction": null,
+          "raw": null,
+          "path": null,
+          "settled": false
+        },
+        {
+          "timestamp": "2026-08-09T18:00:00Z",
+          "value": null,
+          "unit": "",
+          "direction": null,
+          "raw": null,
+          "path": null,
+          "settled": false
+        },
+        {
+          "timestamp": "2026-08-09T19:00:00Z",
+          "value": null,
+          "unit": "",
+          "direction": null,
+          "raw": null,
+          "path": null,
+          "settled": false
+        },
+        {
+          "timestamp": "2026-08-09T20:00:00Z",
+          "value": null,
+          "unit": "",
+          "direction": null,
+          "raw": null,
+          "path": null,
+          "settled": false
+        },
+        {
+          "timestamp": "2026-08-09T21:00:00Z",
+          "value": null,
+          "unit": "",
+          "direction": null,
+          "raw": null,
+          "path": null,
+          "settled": false
+        },
+        {
+          "timestamp": "2026-08-09T22:00:00Z",
+          "value": null,
+          "unit": "",
+          "direction": null,
+          "raw": null,
+          "path": null,
+          "settled": false
+        }
+      ]
+    },
+    "lclouds": {
+      "overlay": "lclouds",
+      "product": "ecmwf",
+      "provider_ref_time": null,
+      "provider_updated": null,
+      "step_minutes": 60,
+      "total_steps_available": 143,
+      "premium": true,
+      "stale": true,
+      "readings": [
+        {
+          "timestamp": "2026-08-09T07:00:00Z",
+          "value": null,
+          "unit": "",
+          "direction": null,
+          "raw": null,
+          "path": null,
+          "settled": false
+        },
+        {
+          "timestamp": "2026-08-09T08:00:00Z",
+          "value": null,
+          "unit": "",
+          "direction": null,
+          "raw": null,
+          "path": null,
+          "settled": false
+        },
+        {
+          "timestamp": "2026-08-09T09:00:00Z",
+          "value": null,
+          "unit": "",
+          "direction": null,
+          "raw": null,
+          "path": null,
+          "settled": false
+        },
+        {
+          "timestamp": "2026-08-09T10:00:00Z",
+          "value": null,
+          "unit": "",
+          "direction": null,
+          "raw": null,
+          "path": null,
+          "settled": false
+        },
+        {
+          "timestamp": "2026-08-09T11:00:00Z",
+          "value": null,
+          "unit": "",
+          "direction": null,
+          "raw": null,
+          "path": null,
+          "settled": false
+        },
+        {
+          "timestamp": "2026-08-09T12:00:00Z",
+          "value": null,
+          "unit": "",
+          "direction": null,
+          "raw": null,
+          "path": null,
+          "settled": false
+        },
+        {
+          "timestamp": "2026-08-09T13:00:00Z",
+          "value": null,
+          "unit": "",
+          "direction": null,
+          "raw": null,
+          "path": null,
+          "settled": false
+        },
+        {
+          "timestamp": "2026-08-09T14:00:00Z",
+          "value": null,
+          "unit": "",
+          "direction": null,
+          "raw": null,
+          "path": null,
+          "settled": false
+        },
+        {
+          "timestamp": "2026-08-09T15:00:00Z",
+          "value": null,
+          "unit": "",
+          "direction": null,
+          "raw": null,
+          "path": null,
+          "settled": false
+        },
+        {
+          "timestamp": "2026-08-09T16:00:00Z",
+          "value": null,
+          "unit": "",
+          "direction": null,
+          "raw": null,
+          "path": null,
+          "settled": false
+        },
+        {
+          "timestamp": "2026-08-09T17:00:00Z",
+          "value": null,
+          "unit": "",
+          "direction": null,
+          "raw": null,
+          "path": null,
+          "settled": false
+        },
+        {
+          "timestamp": "2026-08-09T18:00:00Z",
+          "value": null,
+          "unit": "",
+          "direction": null,
+          "raw": null,
+          "path": null,
+          "settled": false
+        },
+        {
+          "timestamp": "2026-08-09T19:00:00Z",
+          "value": null,
+          "unit": "",
+          "direction": null,
+          "raw": null,
+          "path": null,
+          "settled": false
+        },
+        {
+          "timestamp": "2026-08-09T20:00:00Z",
+          "value": null,
+          "unit": "",
+          "direction": null,
+          "raw": null,
+          "path": null,
+          "settled": false
+        },
+        {
+          "timestamp": "2026-08-09T21:00:00Z",
+          "value": null,
+          "unit": "",
+          "direction": null,
+          "raw": null,
+          "path": null,
+          "settled": false
+        },
+        {
+          "timestamp": "2026-08-09T22:00:00Z",
+          "value": null,
+          "unit": "",
+          "direction": null,
+          "raw": null,
+          "path": null,
+          "settled": false
+        }
+      ]
+    },
+    "mclouds": {
+      "overlay": "mclouds",
+      "product": "ecmwf",
+      "provider_ref_time": null,
+      "provider_updated": null,
+      "step_minutes": 60,
+      "total_steps_available": 143,
+      "premium": true,
+      "stale": true,
+      "readings": [
+        {
+          "timestamp": "2026-08-09T07:00:00Z",
+          "value": null,
+          "unit": "",
+          "direction": null,
+          "raw": null,
+          "path": null,
+          "settled": false
+        },
+        {
+          "timestamp": "2026-08-09T08:00:00Z",
+          "value": null,
+          "unit": "",
+          "direction": null,
+          "raw": null,
+          "path": null,
+          "settled": false
+        },
+        {
+          "timestamp": "2026-08-09T09:00:00Z",
+          "value": null,
+          "unit": "",
+          "direction": null,
+          "raw": null,
+          "path": null,
+          "settled": false
+        },
+        {
+          "timestamp": "2026-08-09T10:00:00Z",
+          "value": null,
+          "unit": "",
+          "direction": null,
+          "raw": null,
+          "path": null,
+          "settled": false
+        },
+        {
+          "timestamp": "2026-08-09T11:00:00Z",
+          "value": null,
+          "unit": "",
+          "direction": null,
+          "raw": null,
+          "path": null,
+          "settled": false
+        },
+        {
+          "timestamp": "2026-08-09T12:00:00Z",
+          "value": null,
+          "unit": "",
+          "direction": null,
+          "raw": null,
+          "path": null,
+          "settled": false
+        },
+        {
+          "timestamp": "2026-08-09T13:00:00Z",
+          "value": null,
+          "unit": "",
+          "direction": null,
+          "raw": null,
+          "path": null,
+          "settled": false
+        },
+        {
+          "timestamp": "2026-08-09T14:00:00Z",
+          "value": null,
+          "unit": "",
+          "direction": null,
+          "raw": null,
+          "path": null,
+          "settled": false
+        },
+        {
+          "timestamp": "2026-08-09T15:00:00Z",
+          "value": null,
+          "unit": "",
+          "direction": null,
+          "raw": null,
+          "path": null,
+          "settled": false
+        },
+        {
+          "timestamp": "2026-08-09T16:00:00Z",
+          "value": null,
+          "unit": "",
+          "direction": null,
+          "raw": null,
+          "path": null,
+          "settled": false
+        },
+        {
+          "timestamp": "2026-08-09T17:00:00Z",
+          "value": null,
+          "unit": "",
+          "direction": null,
+          "raw": null,
+          "path": null,
+          "settled": false
+        },
+        {
+          "timestamp": "2026-08-09T18:00:00Z",
+          "value": null,
+          "unit": "",
+          "direction": null,
+          "raw": null,
+          "path": null,
+          "settled": false
+        },
+        {
+          "timestamp": "2026-08-09T19:00:00Z",
+          "value": null,
+          "unit": "",
+          "direction": null,
+          "raw": null,
+          "path": null,
+          "settled": false
+        },
+        {
+          "timestamp": "2026-08-09T20:00:00Z",
+          "value": null,
+          "unit": "",
+          "direction": null,
+          "raw": null,
+          "path": null,
+          "settled": false
+        },
+        {
+          "timestamp": "2026-08-09T21:00:00Z",
+          "value": null,
+          "unit": "",
+          "direction": null,
+          "raw": null,
+          "path": null,
+          "settled": false
+        },
+        {
+          "timestamp": "2026-08-09T22:00:00Z",
+          "value": null,
+          "unit": "",
+          "direction": null,
+          "raw": null,
+          "path": null,
+          "settled": false
+        }
+      ]
+    },
+    "hclouds": {
+      "overlay": "hclouds",
+      "product": "ecmwf",
+      "provider_ref_time": null,
+      "provider_updated": null,
+      "step_minutes": 60,
+      "total_steps_available": 143,
+      "premium": true,
+      "stale": true,
+      "readings": [
+        {
+          "timestamp": "2026-08-09T07:00:00Z",
+          "value": null,
+          "unit": "",
+          "direction": null,
+          "raw": null,
+          "path": null,
+          "settled": false
+        },
+        {
+          "timestamp": "2026-08-09T08:00:00Z",
+          "value": null,
+          "unit": "",
+          "direction": null,
+          "raw": null,
+          "path": null,
+          "settled": false
+        },
+        {
+          "timestamp": "2026-08-09T09:00:00Z",
+          "value": null,
+          "unit": "",
+          "direction": null,
+          "raw": null,
+          "path": null,
+          "settled": false
+        },
+        {
+          "timestamp": "2026-08-09T10:00:00Z",
+          "value": null,
+          "unit": "",
+          "direction": null,
+          "raw": null,
+          "path": null,
+          "settled": false
+        },
+        {
+          "timestamp": "2026-08-09T11:00:00Z",
+          "value": null,
+          "unit": "",
+          "direction": null,
+          "raw": null,
+          "path": null,
+          "settled": false
+        },
+        {
+          "timestamp": "2026-08-09T12:00:00Z",
+          "value": null,
+          "unit": "",
+          "direction": null,
+          "raw": null,
+          "path": null,
+          "settled": false
+        },
+        {
+          "timestamp": "2026-08-09T13:00:00Z",
+          "value": null,
+          "unit": "",
+          "direction": null,
+          "raw": null,
+          "path": null,
+          "settled": false
+        },
+        {
+          "timestamp": "2026-08-09T14:00:00Z",
+          "value": null,
+          "unit": "",
+          "direction": null,
+          "raw": null,
+          "path": null,
+          "settled": false
+        },
+        {
+          "timestamp": "2026-08-09T15:00:00Z",
+          "value": null,
+          "unit": "",
+          "direction": null,
+          "raw": null,
+          "path": null,
+          "settled": false
+        },
+        {
+          "timestamp": "2026-08-09T16:00:00Z",
+          "value": null,
+          "unit": "",
+          "direction": null,
+          "raw": null,
+          "path": null,
+          "settled": false
+        },
+        {
+          "timestamp": "2026-08-09T17:00:00Z",
+          "value": null,
+          "unit": "",
+          "direction": null,
+          "raw": null,
+          "path": null,
+          "settled": false
+        },
+        {
+          "timestamp": "2026-08-09T18:00:00Z",
+          "value": null,
+          "unit": "",
+          "direction": null,
+          "raw": null,
+          "path": null,
+          "settled": false
+        },
+        {
+          "timestamp": "2026-08-09T19:00:00Z",
+          "value": null,
+          "unit": "",
+          "direction": null,
+          "raw": null,
+          "path": null,
+          "settled": false
+        },
+        {
+          "timestamp": "2026-08-09T20:00:00Z",
+          "value": null,
+          "unit": "",
+          "direction": null,
+          "raw": null,
+          "path": null,
+          "settled": false
+        },
+        {
+          "timestamp": "2026-08-09T21:00:00Z",
+          "value": null,
+          "unit": "",
+          "direction": null,
+          "raw": null,
+          "path": null,
+          "settled": false
+        },
+        {
+          "timestamp": "2026-08-09T22:00:00Z",
+          "value": null,
+          "unit": "",
+          "direction": null,
+          "raw": null,
+          "path": null,
+          "settled": false
+        }
+      ]
+    },
+    "rain": {
+      "overlay": "rain",
+      "product": "ecmwf",
+      "provider_ref_time": null,
+      "provider_updated": null,
+      "step_minutes": 60,
+      "total_steps_available": 143,
+      "premium": true,
+      "stale": false,
+      "readings": [
+        {
+          "timestamp": "2026-08-09T07:00:00Z",
+          "value": 0.0,
+          "unit": "in",
+          "direction": null,
+          "raw": null,
+          "path": null,
+          "settled": true
+        },
+        {
+          "timestamp": "2026-08-09T08:00:00Z",
+          "value": 0.0,
+          "unit": "in",
+          "direction": null,
+          "raw": null,
+          "path": null,
+          "settled": true
+        },
+        {
+          "timestamp": "2026-08-09T09:00:00Z",
+          "value": 0.29,
+          "unit": "in",
+          "direction": null,
+          "raw": null,
+          "path": null,
+          "settled": true
+        },
+        {
+          "timestamp": "2026-08-09T10:00:00Z",
+          "value": 0.29,
+          "unit": "in",
+          "direction": null,
+          "raw": null,
+          "path": null,
+          "settled": true
+        },
+        {
+          "timestamp": "2026-08-09T11:00:00Z",
+          "value": 0.34,
+          "unit": "in",
+          "direction": null,
+          "raw": null,
+          "path": null,
+          "settled": true
+        },
+        {
+          "timestamp": "2026-08-09T12:00:00Z",
+          "value": 0.15,
+          "unit": "in",
+          "direction": null,
+          "raw": null,
+          "path": null,
+          "settled": true
+        },
+        {
+          "timestamp": "2026-08-09T13:00:00Z",
+          "value": null,
+          "unit": "",
+          "direction": null,
+          "raw": null,
+          "path": null,
+          "settled": false
+        },
+        {
+          "timestamp": "2026-08-09T14:00:00Z",
+          "value": 0.0,
+          "unit": "in",
+          "direction": null,
+          "raw": null,
+          "path": null,
+          "settled": true
+        },
+        {
+          "timestamp": "2026-08-09T15:00:00Z",
+          "value": 0.0,
+          "unit": "in",
+          "direction": null,
+          "raw": null,
+          "path": null,
+          "settled": true
+        },
+        {
+          "timestamp": "2026-08-09T16:00:00Z",
+          "value": 0.0,
+          "unit": "in",
+          "direction": null,
+          "raw": null,
+          "path": null,
+          "settled": true
+        },
+        {
+          "timestamp": "2026-08-09T17:00:00Z",
+          "value": 0.0,
+          "unit": "in",
+          "direction": null,
+          "raw": null,
+          "path": null,
+          "settled": true
+        },
+        {
+          "timestamp": "2026-08-09T18:00:00Z",
+          "value": 0.0,
+          "unit": "in",
+          "direction": null,
+          "raw": null,
+          "path": null,
+          "settled": true
+        },
+        {
+          "timestamp": "2026-08-09T19:00:00Z",
+          "value": 0.0,
+          "unit": "in",
+          "direction": null,
+          "raw": null,
+          "path": null,
+          "settled": true
+        },
+        {
+          "timestamp": "2026-08-09T20:00:00Z",
+          "value": null,
+          "unit": "",
+          "direction": null,
+          "raw": null,
+          "path": null,
+          "settled": false
+        },
+        {
+          "timestamp": "2026-08-09T21:00:00Z",
+          "value": 0.08,
+          "unit": "in",
+          "direction": null,
+          "raw": null,
+          "path": null,
+          "settled": true
+        },
+        {
+          "timestamp": "2026-08-09T22:00:00Z",
+          "value": 0.08,
+          "unit": "in",
+          "direction": null,
+          "raw": null,
+          "path": null,
+          "settled": true
+        }
+      ]
+    },
+    "wind": {
+      "overlay": "wind",
+      "product": "ecmwf",
+      "provider_ref_time": null,
+      "provider_updated": null,
+      "step_minutes": 60,
+      "total_steps_available": 143,
+      "premium": true,
+      "stale": false,
+      "readings": [
+        {
+          "timestamp": "2026-08-09T07:00:00Z",
+          "value": 4.0,
+          "unit": "m/s",
+          "direction": "W",
+          "raw": null,
+          "path": null,
+          "settled": true
+        },
+        {
+          "timestamp": "2026-08-09T08:00:00Z",
+          "value": 4.0,
+          "unit": "m/s",
+          "direction": "W",
+          "raw": null,
+          "path": null,
+          "settled": true
+        },
+        {
+          "timestamp": "2026-08-09T09:00:00Z",
+          "value": 4.0,
+          "unit": "m/s",
+          "direction": "W",
+          "raw": null,
+          "path": null,
+          "settled": true
+        },
+        {
+          "timestamp": "2026-08-09T10:00:00Z",
+          "value": null,
+          "unit": "",
+          "direction": null,
+          "raw": null,
+          "path": null,
+          "settled": false
+        },
+        {
+          "timestamp": "2026-08-09T11:00:00Z",
+          "value": null,
+          "unit": "",
+          "direction": null,
+          "raw": null,
+          "path": null,
+          "settled": false
+        },
+        {
+          "timestamp": "2026-08-09T12:00:00Z",
+          "value": 4.0,
+          "unit": "m/s",
+          "direction": "W",
+          "raw": null,
+          "path": null,
+          "settled": true
+        },
+        {
+          "timestamp": "2026-08-09T13:00:00Z",
+          "value": null,
+          "unit": "",
+          "direction": null,
+          "raw": null,
+          "path": null,
+          "settled": false
+        },
+        {
+          "timestamp": "2026-08-09T14:00:00Z",
+          "value": null,
+          "unit": "",
+          "direction": null,
+          "raw": null,
+          "path": null,
+          "settled": false
+        },
+        {
+          "timestamp": "2026-08-09T15:00:00Z",
+          "value": 3.0,
+          "unit": "m/s",
+          "direction": "SW",
+          "raw": null,
+          "path": null,
+          "settled": true
+        },
+        {
+          "timestamp": "2026-08-09T16:00:00Z",
+          "value": 3.0,
+          "unit": "m/s",
+          "direction": "SW",
+          "raw": null,
+          "path": null,
+          "settled": true
+        },
+        {
+          "timestamp": "2026-08-09T17:00:00Z",
+          "value": null,
+          "unit": "",
+          "direction": null,
+          "raw": null,
+          "path": null,
+          "settled": false
+        },
+        {
+          "timestamp": "2026-08-09T18:00:00Z",
+          "value": 4.0,
+          "unit": "m/s",
+          "direction": "W",
+          "raw": null,
+          "path": null,
+          "settled": true
+        },
+        {
+          "timestamp": "2026-08-09T19:00:00Z",
+          "value": null,
+          "unit": "",
+          "direction": null,
+          "raw": null,
+          "path": null,
+          "settled": false
+        },
+        {
+          "timestamp": "2026-08-09T20:00:00Z",
+          "value": null,
+          "unit": "",
+          "direction": null,
+          "raw": null,
+          "path": null,
+          "settled": false
+        },
+        {
+          "timestamp": "2026-08-09T21:00:00Z",
+          "value": 4.0,
+          "unit": "m/s",
+          "direction": "W",
+          "raw": null,
+          "path": null,
+          "settled": true
+        },
+        {
+          "timestamp": "2026-08-09T22:00:00Z",
+          "value": 4.0,
+          "unit": "m/s",
+          "direction": "W",
+          "raw": null,
+          "path": null,
+          "settled": true
+        }
+      ]
+    }
+  }
+}

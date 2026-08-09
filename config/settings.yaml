@@ -364,6 +364,16 @@ windy_capture:
 # extra layers, not as a replacement for the weather feed.
 windy_scrape:
   enabled: true
+  # embed | www | auto
+  #   embed  no login needed, but ALWAYS free tier: 3-hourly, ~3 usable
+  #          daylight points a day. Cannot be improved - the embed does
+  #          no premium check and the session carries no token to it.
+  #   www    the full app. With the premium session: HOURLY, 143 steps,
+  #          ~13 daylight points. Needs WebGL (SwiftShader) and the
+  #          weather picker pinned.
+  #   auto   www when windy_session.json exists, embed otherwise.
+  source: auto
+  zoom_www: 11             # their ZOOM_LEVEL; ~111 km across the frame
   overlays: [solarpower, clouds, lclouds, mclouds, hclouds, rain, wind]
   output_dir: data/windy/values
   features_dir: data/windy/features

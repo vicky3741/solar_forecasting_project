@@ -177,6 +177,28 @@ class WindyScraper:
         self.overlays = overlays or scrape.get("overlays", self.DEFAULT_OVERLAYS)
         self.output_dir = Path(scrape.get("output_dir", "data/windy/values"))
 
+        # WHICH PAGE TO READ, AND WHY IT MATTERS
+        #
+        #   embed  embed.windy.com. No login needed, but ALWAYS free
+        #          tier: 3-hourly ECMWF, ~3 usable daylight points a
+        #          day. Measured 2026-08-09, and it cannot be improved
+        #          - the embed does no premium check at all, and the
+        #          session's localStorage holds no auth token to carry
+        #          across (all 36 keys are settings_*).
+        #   www    www.windy.com, the full application. With the saved
+        #          premium session this serves HOURLY ECMWF - 60-minute
+        #          steps, 143 of them, about 13 daylight points a day.
+        #
+        # "auto" picks www when a premium session exists, embed
+        # otherwise, so this does the best available thing without
+        # needing to be reconfigured when the session appears.
+        self.source = scrape.get("source", "auto")
+
+        if self.source == "auto":
+            self.source = "www" if self.session_file.exists() else "embed"
+
+        self.zoom_www = scrape.get("zoom_www", 11)
+
         # How long to let Windy fetch and render a step before reading
         # the value back. Measured at ~600-900 ms on a warm page; the
         # default leaves headroom for the EC2 box.
@@ -198,6 +220,61 @@ class WindyScraper:
         "--disable-extensions",
         "--no-sandbox",
     ]
+
+    # www.windy.com draws its map with WebGL; the embed does not. With
+    # the args above, headless Chromium has no GL backend and the full
+    # app renders a flat grey page reading "Failed to initialize WebGL
+    # Overlay" - while still producing a valid screenshot and a
+    # perfectly precise measurement of nothing. SwiftShader is
+    # Chromium's software GL, so the map renders without a GPU, at some
+    # CPU and memory cost.
+    WEBGL_BROWSER_ARGS = [
+        "--disable-dev-shm-usage",
+        "--disable-extensions",
+        "--no-sandbox",
+        "--use-gl=angle",
+        "--use-angle=swiftshader",
+        "--enable-unsafe-swiftshader",
+    ]
+
+    # Where the plant's value appears, per page.
+    READOUT_SELECTOR = {
+        "embed": "big",                     # the embed's picker
+        "www": ".picker-change-metric",     # the full app's pinned picker
+    }
+
+    @property
+    def browser_args(self):
+
+        return (
+            self.WEBGL_BROWSER_ARGS if self.source == "www"
+            else self.LOW_MEMORY_BROWSER_ARGS
+        )
+
+    @property
+    def viewport(self):
+
+        return (
+            {"width": 1600, "height": 1000} if self.source == "www"
+            else {"width": 1280, "height": 720}
+        )
+
+    def www_url(self, overlay):
+        """
+        Their URL template - the full application, centred on the plant.
+        """
+
+        return (
+            f"https://www.windy.com/{self.lat}/{self.lon}"
+            f"?{overlay},{self.lat},{self.lon},{self.zoom_www},p:cities"
+        )
+
+    def layer_url(self, overlay):
+
+        return (
+            self.www_url(overlay) if self.source == "www"
+            else self.embed_url(overlay)
+        )
 
     def embed_url(self, overlay):
         """
@@ -246,11 +323,11 @@ class WindyScraper:
     # alongside so a label that moves while the data behind it does
     # not is visible rather than silently trusted.
     _SWEEP_JS = """
-    async ({lat, lon, waitMs, maxSteps}) => {
+    async ({lat, lon, waitMs, maxSteps, selector, useInterpolator}) => {
       const W = window.W;
       const sleep = ms => new Promise(r => setTimeout(r, ms));
       const read = () => {
-        const el = document.querySelector('big');
+        const el = document.querySelector(selector);
         return el ? el.innerText.trim() : null;
       };
 
@@ -272,13 +349,20 @@ class WindyScraper:
 
       // Poll until the label reads identically twice in a row, so a
       // half-loaded step can never be recorded as a measurement.
+      //
+      // A null reading is NOT a stable reading. The full app's picker
+      // can be empty for a second or two after a step while it fetches
+      // the point value, and treating "null twice" as settled recorded
+      // gaps at 10:00Z and 11:00Z and lost every cloud layer entirely
+      // on 2026-08-09. Null therefore resets the counter and keeps
+      // waiting, up to the same overall limit.
       const settle = async () => {
         let previous = null, stable = 0;
-        const limit = Math.max(8, Math.ceil(waitMs / 250) * 4);
+        const limit = Math.max(12, Math.ceil(waitMs / 250) * 6);
         for (let i = 0; i < limit; i++) {
           await sleep(250);
           const now = read();
-          if (now === previous) {
+          if (now !== null && now !== '' && now === previous) {
             stable++;
             if (stable >= 2) return {value: now, settledMs: (i + 1) * 250};
           } else {
@@ -288,7 +372,14 @@ class WindyScraper:
         return {value: read(), settledMs: limit * 250, settled: false};
       };
 
+      // W.interpolator is EMBED-ONLY. On www.windy.com it throws
+      // "Cannot destructure property 'premiumOnly' of 'j[e]'" from deep
+      // inside Windy's own bundle, which aborts the whole sweep and
+      // loses every layer. The full app does not need it - the pinned
+      // picker already puts the exact figure in the DOM - so it is
+      // simply not called there.
       const interpolate = () => new Promise((res) => {
+        if (!useInterpolator) { res(null); return; }
         let done = false;
         const timer = setTimeout(() => { if (!done) { done = true; res(null); } }, 6000);
         try {
@@ -300,6 +391,18 @@ class WindyScraper:
         } catch (e) { done = true; clearTimeout(timer); res(null); }
       });
 
+      // W.store.get('path') THROWS on www.windy.com - the same
+      // "Cannot destructure property 'premiumOnly'" from inside Windy's
+      // bundle. It is only a diagnostic (which data file served this
+      // step), so it must never be allowed to abort a sweep and lose
+      // every layer. An earlier survey had this read inside a
+      // try/catch and reported path as null, which hid the throw and
+      // sent the whole investigation after the timestamp setter and
+      // then the interpolator, neither of which was at fault.
+      const safePath = () => {
+        try { return W.store.get('path'); } catch (e) { return null; }
+      };
+
       const stamps = calendar.timestamps.slice(0, maxSteps);
       const rows = [];
 
@@ -309,7 +412,7 @@ class WindyScraper:
         const settled = await settle();
         rows.push({
           ts: ts,
-          path: W.store.get('path'),
+          path: safePath(),
           big: settled.value,
           settledMs: settled.settledMs,
           settled: settled.settled !== false,
@@ -333,6 +436,51 @@ class WindyScraper:
 
     # --------------------------------------------------
 
+    def pin_picker(self, page):
+        """
+        Pin the full app's weather picker on the plant, so its value
+        appears in the DOM.
+
+        Right-click alone is NOT enough: it opens Windy's context menu
+        and leaves it sitting over the plant. The menu item has to be
+        clicked, which both pins the picker and clears the menu. If the
+        item cannot be found, Escape closes the menu so at least it is
+        not covering the map.
+        """
+
+        width = self.viewport["width"]
+        height = self.viewport["height"]
+
+        try:
+            page.mouse.click(width // 2, height // 2, button="right")
+            page.wait_for_timeout(1500)
+        except Exception as error:
+            self.logger.warning(f"Picker right-click failed ({error})")
+            return False
+
+        for selector in ("text=Show weather picker", "text=Weather picker"):
+
+            try:
+                page.locator(selector).first.click(timeout=3000)
+                page.wait_for_timeout(2000)
+                return True
+            except Exception:
+                continue
+
+        self.logger.warning(
+            "Could not pin the weather picker - readings for this layer will "
+            "be empty"
+        )
+
+        try:
+            page.keyboard.press("Escape")
+        except Exception:
+            pass
+
+        return False
+
+    # --------------------------------------------------
+
     def scrape_overlay(self, page, overlay):
         """
         Walks one overlay's forecast timeline and returns its
@@ -348,7 +496,7 @@ class WindyScraper:
         """
 
         page.goto(
-            self.embed_url(overlay),
+            self.layer_url(overlay),
             wait_until="load",
             timeout=self.page_timeout_ms
         )
@@ -364,6 +512,9 @@ class WindyScraper:
         )
         page.wait_for_timeout(2000)   # let the first tiles paint
 
+        if self.source == "www":
+            self.pin_picker(page)
+
         result = page.evaluate(
             self._SWEEP_JS,
             {
@@ -371,6 +522,8 @@ class WindyScraper:
                 "lon": self.lon,
                 "waitMs": self.step_wait_ms,
                 "maxSteps": self.max_steps,
+                "selector": self.READOUT_SELECTOR[self.source],
+                "useInterpolator": self.source == "embed",
             }
         )
 
@@ -469,12 +622,18 @@ class WindyScraper:
 
             browser = playwright.chromium.launch(
                 headless=self.headless,
-                args=self.LOW_MEMORY_BROWSER_ARGS
+                args=self.browser_args
             )
 
-            options = {"viewport": {"width": 1280, "height": 720}}
+            options = {"viewport": self.viewport}
             if self.session_file.exists():
                 options["storage_state"] = str(self.session_file)
+
+            self.logger.info(
+                f"Windy scrape source: {self.source}"
+                + (" (premium session present)" if self.session_file.exists()
+                   else " (no session - free tier)")
+            )
 
             context = browser.new_context(**options)
             page = context.new_page()
