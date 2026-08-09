@@ -103,6 +103,11 @@ class LLMScheduler:
 
         self.output_mode = fusion.get("llm_output", "kt")
         self.max_kt = fusion.get("max_clear_sky_index", 1.2)
+
+        # How much of the published number is the model's, the rest
+        # being the physics anchor. 1.0 = the model alone, which is what
+        # every run before 2026-08-09 did.
+        self.blend_weight = float(fusion.get("blend_weight", 1.0))
         self.temperature = fusion.get("temperature", 0.1)
         self.max_output_tokens = fusion.get("max_output_tokens", 8192)
 
@@ -140,14 +145,31 @@ class LLMScheduler:
 
         clearsky = ahead["clearsky_power_mw"].to_numpy(dtype=float)
 
-        kt = ahead["windy_kt"].to_numpy(dtype=float).copy()
+        # THE ANCHOR IS DAMPED PERSISTENCE, AND NOTHING ELSE BY DEFAULT.
+        #
+        # A forecast has two possible jobs here: information the model
+        # reads, and the reference the validator enforces. Letting one
+        # signal do BOTH means a wrong forecast is applied twice - the
+        # model is told to believe it, and then bounded toward it when
+        # it does not.
+        #
+        # 2026-07-27 is what that costs. ECMWF said sunny; the day was
+        # overcast. With weather as anchor AND prompt column the model
+        # published 16.14 MWh against 8.95 actual - over on 31 of 35
+        # blocks, Rs 3,456. Damped persistence on the same day: 8.88
+        # against 8.95, Rs 129. The plainest signal was right within 1%
+        # while both forecast-led versions were wrong by 35-80%.
+        #
+        # So the anchor is the thing that has earned it. Forecasts stay
+        # in the prompt, where the model may weigh them and say why.
+        kt = np.full(len(ahead), np.nan)
 
-        # Where Windy has no value - every historical run, and any block
-        # between its 3-hourly steps - fall back to the ECMWF weather
-        # forecast before falling back to persistence. It is the same
-        # model Windy serves, so this is not a different opinion; it is
-        # the same opinion, available on every block.
-        if "weather_kt" in ahead.columns:
+        source = settings.get("fusion", {}).get("anchor_source", "persistence")
+
+        if source in ("windy", "forecast") and "windy_kt" in ahead.columns:
+            kt = ahead["windy_kt"].to_numpy(dtype=float).copy()
+
+        if source == "forecast" and "weather_kt" in ahead.columns:
             weather = ahead["weather_kt"].to_numpy(dtype=float)
             kt = np.where(np.isfinite(kt), kt, weather)
 
@@ -663,13 +685,37 @@ the {count} blocks from {first_block} to {last_block}, in order, with no gaps.\
 
         kt, power = self.to_power(raw, ahead)
 
+        anchor = self.anchor_mw(features, ahead)
+
+        # BLEND WITH THE ANCHOR, DO NOT MERELY BOUND BY IT.
+        #
+        # Bounding lets the model publish anything inside a wide band
+        # and gives the anchor no say within it. Blending gives the
+        # anchor weight on EVERY block, which is how the production
+        # pipeline treats every signal it has - Chronos at 0.2, weather
+        # at 0.25 - and that pipeline is the one at 6.6%.
+        #
+        # The evidence for doing it here: on 2026-07-27 the model swung
+        # from +80% (with weather) to -35% (without) while damped
+        # persistence sat within 1% of truth all day. A signal that
+        # unstable should move the published number, not be it.
+        if self.blend_weight < 1.0:
+            power = (
+                self.blend_weight * power
+                + (1.0 - self.blend_weight) * anchor
+            )
+
         schedule = pd.DataFrame({
             "block": ahead["block"].to_numpy(),
             "timestamp": ahead["timestamp"].to_numpy(),
             "time": ahead["time"].to_numpy(),
             "clearsky_power_mw": ahead["clearsky_power_mw"].to_numpy(),
             "windy_kt": ahead["windy_kt"].to_numpy(),
-            "anchor_mw": self.anchor_mw(features, ahead),
+            "anchor_mw": anchor,
+            "llm_raw_mw": np.clip(
+                kt * ahead["clearsky_power_mw"].to_numpy(dtype=float),
+                0.0, self.capacity_mw,
+            ) if self.output_mode == "kt" else np.clip(raw, 0, self.capacity_mw),
             "llm_kt": kt,
             "forecast_mw": power,
         })

@@ -401,13 +401,34 @@ fusion:
   #   mw  - the model emits megawatts directly.
   llm_output: kt
   max_clear_sky_index: 1.2
-  # OFF on measured evidence, 2026-08-09. Day-schedule scoring over 12
-  # days: Rs 17,786 with weather against Rs 15,420 without (deviation
-  # 11.44% vs 10.92%). Suspected cause is the wiring, not the forecast -
-  # it became the validator's anchor as well as a prompt column, so the
-  # model was overruled toward it twice. Turn back on only after those
-  # two roles are separated and the result re-scored.
-  use_weather: false
+  # BACK ON, now that the wiring is fixed. Weather is INFORMATION in the
+  # prompt only; it is no longer the validator's anchor (see
+  # anchor_source below). The two roles are separate, which is what made
+  # 2026-07-27 so expensive - one wrong forecast was applied twice.
+  use_weather: true
+
+  # What the validator measures the model against. NOT a forecast.
+  #   persistence  damped persistence from today's meter - the last
+  #                measured cloudiness decaying toward the day's average
+  #   windy        Windy's forecast where present, persistence elsewhere
+  #   forecast     Windy then ECMWF then persistence  (the 2026-08-09
+  #                wiring that cost Rs 3,456 in one day)
+  #
+  # Persistence has earned it: on 2026-07-27 it sat within 1% of the
+  # day's actual generation (8.88 MWh against 8.95) while the model
+  # published 16.14 with weather and 5.81 without.
+  anchor_source: persistence
+
+  # Share of the published number that is the model's; the rest is the
+  # anchor. Bounding alone lets the model publish anything inside a wide
+  # band and gives the anchor no say within it - blending gives it
+  # weight on every block, which is how the production pipeline treats
+  # every signal it has (Chronos 0.2, weather 0.25) and that pipeline
+  # is the one at 6.6%.
+  #
+  # 0.5 is a starting point, not a tuned value. Sweep it once the
+  # seven-run backtest is complete.
+  blend_weight: 0.5
   # Lower than the vision prompt's 0.2: a schedule should not change
   # because the sampler rolled differently, and the freeze horizon makes
   # run-to-run jitter expensive.
@@ -423,9 +444,14 @@ fusion:
   validator:
     enabled: true
     # How far a block may sit from the physics anchor. Their
-    # MAX_DEVIATION_FRACTION. The model keeps its judgement; it just
-    # cannot quarter a block on a hunch.
-    max_deviation_fraction: 0.40
+    # MAX_DEVIATION_FRACTION is 0.40; ours is tighter on evidence.
+    #
+    # On 2026-07-27 the model swung from +80% to -35% of the day's real
+    # generation depending on one input, while the anchor stayed within
+    # 1%. A band of 0.40 was wide enough to permit both. 0.25 still
+    # lets the model make a real call - a quarter of a block is a large
+    # move - without letting one bad input run away with the day.
+    max_deviation_fraction: 0.25
     # Largest change between consecutive 15-min blocks, as a fraction of
     # capacity (their MAX_STEP_CHANGE_MW = capacity * 0.35). A fraction
     # rather than MW so it carries to Kasipet and Bhupalpally unchanged.
