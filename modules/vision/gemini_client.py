@@ -103,6 +103,43 @@ class GeminiClient:
             max_output_tokens=settings["vision"]["max_output_tokens"]
         )
 
+        return self.call_with_fallback(contents, config)
+
+    # --------------------------------------------------
+
+    def generate_text(self, prompt, temperature=None, max_output_tokens=None):
+        """
+        A plain text-in / text-out call, sharing every protection the
+        frame path already has: per-model daily-quota detection, the
+        fallback chain down `fallback_models`, and backoff over
+        transient 503s.
+
+        Added for the new pipeline's fusion step
+        (modules/fusion/llm_scheduler.py), which sends a numeric
+        feature table rather than images. Routing it through this
+        client rather than a fresh one means the day's quota is
+        tracked in ONE place - two independent clients would each
+        discover the 20-requests-per-day cap separately, and the
+        second would discover it by losing a forecast.
+        """
+
+        vision = settings["vision"]
+
+        config = types.GenerateContentConfig(
+            temperature=(
+                vision["temperature"] if temperature is None else temperature
+            ),
+            max_output_tokens=(
+                vision["max_output_tokens"]
+                if max_output_tokens is None else max_output_tokens
+            ),
+        )
+
+        return self.call_with_fallback([prompt], config)
+
+    # --------------------------------------------------
+
+    def call_with_fallback(self, contents, config):
         # The free tier returns 503 ("model is currently experiencing
         # high demand") in bursts - on 2026-07-23 that cost the vision
         # signal on all three runs of the day, because a single refusal

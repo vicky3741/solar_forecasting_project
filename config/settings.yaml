@@ -371,6 +371,25 @@ windy_scrape:
   max_steps: 16            # 16 x 3h = 2 days; a run only ever needs today
   page_timeout_ms: 60000
 
+# The new approach's final stage: the LLM reads the per-block feature
+# table and decides the schedule (modules/fusion/llm_scheduler.py).
+fusion:
+  # What the model returns per block.
+  #   kt  - clear-sky index 0-1.2, multiplied here by the pvlib clear-sky
+  #         curve to get MW. The model still decides every block; it just
+  #         does not also do the trigonometry, which pvlib does exactly.
+  #         A kt of 1.4 is visibly wrong and gets clipped - "4.9 MW at
+  #         5 pm" is not, until it is graded a day later.
+  #   mw  - the model emits megawatts directly.
+  llm_output: kt
+  max_clear_sky_index: 1.2
+  # Lower than the vision prompt's 0.2: a schedule should not change
+  # because the sampler rolled differently, and the freeze horizon makes
+  # run-to-run jitter expensive.
+  temperature: 0.1
+  max_output_tokens: 8192
+  output_dir: outputs/llm_schedules
+
 paths:
   raw_data: data/raw
   processed_data: data/processed
