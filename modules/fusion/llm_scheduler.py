@@ -114,37 +114,62 @@ class LLMScheduler:
 
     # --------------------------------------------------
 
-    def anchor_mw(self, ahead):
+    def anchor_mw(self, features, ahead):
         """
         The physics baseline each block is measured against.
 
-        Windy's own forecast clear-sky index where it exists, since
-        that is a real forward-looking number; otherwise the last
-        measured kt held flat; otherwise clear sky. Multiplied by the
-        pvlib curve, so the anchor always carries exact solar geometry
-        whatever the cloudiness estimate came from.
+        Windy's own forecast clear-sky index where it exists, because
+        that is a real forward-looking number. Where it does not, the
+        last MEASURED cloudiness from today's meter, decayed toward the
+        day's average as the horizon grows.
 
-        This is what the validator bounds the LLM against - so it has
-        to be a number we would be willing to publish on its own.
+        THE FALLBACK IS NOT CLEAR SKY, AND THAT MATTERS. An earlier
+        version defaulted to kt = 1.0 whenever Windy was missing, which
+        makes the anchor a perfectly sunny day. On 2026-07-27 - an
+        overcast day with no scraped Windy values - the model correctly
+        forecast about half of clear sky, and the validator then pulled
+        34 of 35 blocks back UP toward sunshine because they sat more
+        than 40% from that anchor. The guard rail was making the
+        forecast worse.
+
+        Damped persistence is the right fallback on the evidence: it
+        scored 9.80% in the 2026-08-09 walk-forward, beating every
+        model built on the clips. An anchor should be something we
+        would publish on its own, and that one is.
         """
 
         clearsky = ahead["clearsky_power_mw"].to_numpy(dtype=float)
 
         kt = ahead["windy_kt"].to_numpy(dtype=float).copy()
 
-        if "actual_kt" in ahead.columns:
-            fallback = float(
-                pd.Series(ahead["actual_kt"]).dropna().tail(4).mean()
-            ) if ahead["actual_kt"].notna().any() else np.nan
-        else:
-            fallback = np.nan
+        measured = pd.Series(dtype=float)
 
-        if not np.isfinite(fallback):
-            fallback = 1.0
+        if "actual_kt" in features.columns:
+            measured = features.loc[
+                features["is_past"] == 1, "actual_kt"
+            ].dropna()
+
+        if measured.empty:
+            fallback = np.full(len(ahead), 1.0)
+
+        else:
+            kt_now = float(measured.tail(4).mean())
+            kt_day = float(measured.mean())
+
+            horizon = (
+                (ahead["timestamp"] - ahead["timestamp"].iloc[0])
+                .dt.total_seconds().to_numpy() / 60.0
+            )
+
+            weight = np.exp(-horizon / 120.0)
+
+            fallback = kt_now * weight + kt_day * (1 - weight)
 
         kt = np.where(np.isfinite(kt), kt, fallback)
 
-        return np.clip(kt * clearsky, 0.0, self.capacity_mw)
+        return np.clip(
+            np.clip(kt, 0.0, self.max_kt) * clearsky, 0.0, self.capacity_mw
+        )
 
     # --------------------------------------------------
 
@@ -628,7 +653,7 @@ the {count} blocks from {first_block} to {last_block}, in order, with no gaps.\
             "time": ahead["time"].to_numpy(),
             "clearsky_power_mw": ahead["clearsky_power_mw"].to_numpy(),
             "windy_kt": ahead["windy_kt"].to_numpy(),
-            "anchor_mw": self.anchor_mw(ahead),
+            "anchor_mw": self.anchor_mw(features, ahead),
             "llm_kt": kt,
             "forecast_mw": power,
         })
