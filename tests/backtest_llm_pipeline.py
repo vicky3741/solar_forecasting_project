@@ -64,7 +64,18 @@ from modules.vision.vision_module import VisionModule
 from utils.logger import get_logger
 
 
-DEFAULT_RUN_TIMES = ["09:45", "12:45", "15:45"]
+# ALL of this plant's official scheduling times, from settings, because
+# that is what the mentor's workflow document specifies:
+#
+#   "Windy forecast data must be captured and stored ... at the
+#    following predefined schedule generation times: 06:45, 08:15,
+#    09:45, 11:15, 12:45, 14:15, and 15:45."
+#
+# An earlier sweep sampled three of them to save Gemini quota. That
+# understated the pipeline: with three runs a day each one has to cover
+# a far longer stretch alone, where in production the next revision
+# arrives 90 minutes later and repairs it.
+DEFAULT_RUN_TIMES = settings["forecast"]["run_times"]
 
 
 class PipelineBacktest:

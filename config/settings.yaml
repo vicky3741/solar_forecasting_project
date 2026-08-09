@@ -401,6 +401,13 @@ fusion:
   #   mw  - the model emits megawatts directly.
   llm_output: kt
   max_clear_sky_index: 1.2
+  # OFF on measured evidence, 2026-08-09. Day-schedule scoring over 12
+  # days: Rs 17,786 with weather against Rs 15,420 without (deviation
+  # 11.44% vs 10.92%). Suspected cause is the wiring, not the forecast -
+  # it became the validator's anchor as well as a prompt column, so the
+  # model was overruled toward it twice. Turn back on only after those
+  # two roles are separated and the result re-scored.
+  use_weather: false
   # Lower than the vision prompt's 0.2: a schedule should not change
   # because the sampler rolled differently, and the freeze horizon makes
   # run-to-run jitter expensive.

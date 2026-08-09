@@ -483,11 +483,30 @@ class WindyFeatureBuilder:
         0.76 for the bias correction.
         """
 
-        weather = OpenMeteoClient()
-
         grid["weather_ghi_w_m2"] = np.nan
         grid["weather_kt"] = np.nan
         grid["weather_bias_factor"] = 1.0
+
+        # OFF BY DEFAULT, on measured evidence rather than principle.
+        # Adding it made things WORSE on the 12-day day-schedule scoring:
+        # Rs 17,786 with weather against Rs 15,420 without, deviation
+        # 11.44% against 10.92%.
+        #
+        # The likely cause is not the forecast itself but how it was
+        # wired: it became the validator's ANCHOR as well as a prompt
+        # column, so the model was overruled toward it twice over, and
+        # on 2026-07-27 the validator adjusted 30 of 35 blocks. That day
+        # alone cost Rs 3,456 against the baseline's Rs 759.
+        #
+        # The code stays because the signal is worth 1.2 pts in the
+        # production blend and is very likely worth something here too -
+        # but as information the model may weigh, not as a second
+        # authority overriding it. Re-enable with fusion.use_weather
+        # when that has been separated and re-scored.
+        if not settings.get("fusion", {}).get("use_weather", False):
+            return grid
+
+        weather = OpenMeteoClient()
 
         if not weather.enabled:
             return grid
