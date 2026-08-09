@@ -432,6 +432,14 @@ windy_capture_k1:
   screenshot_dir: data/windy/k1_screenshots
   video_dir: data/windy/k1_videos
 
+# Where fresh meter exports are dropped by hand before being copied into
+# data/historical (modules/preprocessing/meter_inbox.py). Confirmed with
+# the user 2026-08-09. Copy-only: the inbox is shared, so nothing is ever
+# moved or deleted out of it.
+meter_inbox:
+  enabled: true
+  path: ~/OneDrive/Desktop/Vedanjay/SIRMOUR_DATA/SIRMOUR_DATA/meter_data
+
 paths:
   raw_data: data/raw
   processed_data: data/processed

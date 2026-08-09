@@ -90,13 +90,31 @@ WAIT_AFTER_PICKER = 1500
 NAVIGATION_TIMEOUT = 60000
 VIDEO_LOAD_WAIT = 15000
 
-LOW_MEMORY_BROWSER_ARGS = [
+# www.windy.com DRAWS ITS MAP WITH WebGL, unlike the embed. The
+# low-memory arg set used for the embed capture (--disable-gpu plus
+# --disable-software-rasterizer) leaves headless Chromium with no GL
+# backend at all, and Windy then renders a flat grey page carrying
+# "Failed to initialize WebGL Overlay".
+#
+# That failure is silent to everything downstream: the screenshot is a
+# valid PNG, the capture reports 5/5 layers, and the features come out
+# as brightness 146.0 with a standard deviation of exactly 0.0 for
+# every layer - a solid grey rectangle measured with great precision.
+# Measured 2026-08-09.
+#
+# SwiftShader is Chromium's software GL implementation, so the map
+# renders without a GPU. It costs CPU and memory, which matters on the
+# ~900 MB EC2 box - profile before scheduling this there.
+WEBGL_BROWSER_ARGS = [
     "--disable-dev-shm-usage",
-    "--disable-gpu",
-    "--disable-software-rasterizer",
     "--disable-extensions",
     "--no-sandbox",
+    "--use-gl=angle",
+    "--use-angle=swiftshader",
+    "--enable-unsafe-swiftshader",
 ]
+
+LOW_MEMORY_BROWSER_ARGS = WEBGL_BROWSER_ARGS
 
 
 class WindyCaptureK1:
@@ -198,9 +216,17 @@ class WindyCaptureK1:
 
     def set_picker_point(self, page):
         """
-        Their step: right-click the map centre so Windy pins its
-        weather picker on the plant. The picker readout is what makes
-        the number visible on the layer.
+        Right-click the map centre, then CLICK "Show weather picker".
+
+        Both steps are required. The right-click only opens Windy's
+        context menu, and that menu then sits directly over the plant -
+        which is exactly the area the ROI box measures. Leaving it open
+        put a grey menu panel in the middle of every screenshot on
+        2026-08-09.
+
+        Clicking the item pins the picker and dismisses the menu, and
+        the pinned picker is also what puts the value in the DOM
+        (class "picker-change-metric", e.g. "0 W/m²").
         """
 
         try:
@@ -208,11 +234,55 @@ class WindyCaptureK1:
                 VIEWPORT_WIDTH // 2, VIEWPORT_HEIGHT // 2, button="right"
             )
             page.wait_for_timeout(WAIT_AFTER_PICKER)
-            return True
 
         except Exception as error:
-            self.logger.warning(f"Picker point not set ({error})")
+            self.logger.warning(f"Picker right-click failed ({error})")
             return False
+
+        for selector in ("text=Show weather picker", "text=Weather picker"):
+
+            try:
+                page.locator(selector).first.click(timeout=3000)
+                page.wait_for_timeout(WAIT_AFTER_PICKER)
+                return True
+
+            except Exception:
+                continue
+
+        # The menu opened but the item was not found. Close it, or it
+        # will cover the plant in the screenshot.
+        self.logger.warning(
+            "Could not click 'Show weather picker' - dismissing the menu so "
+            "it does not cover the plant"
+        )
+
+        try:
+            page.keyboard.press("Escape")
+            page.wait_for_timeout(500)
+        except Exception:
+            pass
+
+        return False
+
+    # --------------------------------------------------
+
+    def read_picker_value(self, page):
+        """
+        The pinned picker's readout for the current overlay, as text
+        (e.g. "0 W/m²"), or None. This is the exact figure at the plant
+        - no colour inversion, no pixel statistics.
+        """
+
+        try:
+            element = page.locator(".picker-change-metric").first
+
+            if element.is_visible(timeout=2000):
+                return element.inner_text().strip()
+
+        except Exception:
+            pass
+
+        return None
 
     # --------------------------------------------------
 
@@ -236,6 +306,7 @@ class WindyCaptureK1:
             )
 
         captured = {}
+        readouts = {}
 
         with sync_playwright() as playwright:
 
@@ -261,11 +332,18 @@ class WindyCaptureK1:
 
                     self.set_picker_point(page)
 
+                    value = self.read_picker_value(page)
+
                     path = self.screenshot_dir / f"{stem}_{layer}.png"
                     page.screenshot(path=str(path))
 
                     captured[layer] = path
-                    self.logger.info(f"k1 layer captured: {path.name}")
+                    readouts[layer] = value
+
+                    self.logger.info(
+                        f"k1 layer captured: {path.name}"
+                        + (f"  picker={value}" if value else "")
+                    )
 
                 except Exception as error:
                     self.logger.warning(
@@ -274,6 +352,16 @@ class WindyCaptureK1:
 
             context.close()
             browser.close()
+
+        if readouts:
+
+            self.screenshot_dir.mkdir(parents=True, exist_ok=True)
+
+            import json
+
+            (self.screenshot_dir / f"{stem}_picker.json").write_text(
+                json.dumps(readouts, indent=2), encoding="utf-8"
+            )
 
         return captured
 
