@@ -1,0 +1,19 @@
+{
+  "sat_video": "sirmour_260720_23_06.mp4",
+  "sat_frames_used": 24,
+  "sat_brightness_mean": 55.56,
+  "sat_brightness_std": 0.65,
+  "sat_contrast": 21.03,
+  "sat_clear_pct": 97.76,
+  "sat_thin_cloud_pct": 1.1,
+  "sat_thick_cloud_pct": 1.14,
+  "sat_entropy": 1.441,
+  "sat_north_cloud_pct": 1.55,
+  "sat_south_cloud_pct": 1.88,
+  "sat_west_cloud_pct": 1.72,
+  "sat_east_cloud_pct": 1.71,
+  "sat_cloud_trend_pct": -1.05,
+  "sat_flow_divergence": -3e-06,
+  "sat_flow_vorticity": 0.000362,
+  "sat_flow_kinetic_energy": 3.4e-05
+}
