@@ -91,6 +91,15 @@ def score_one(path, meter, clearsky):
     else:
         schedule["timestamp"] = schedule["timestamp"].dt.tz_convert(TIMEZONE)
 
+    # modules/evaluation/actuals_feedback.py writes actual_mw straight
+    # into the schedule files, so a schedule that has already been
+    # through the feedback loop carries the column - and merging on top
+    # of it produces actual_mw_x / actual_mw_y rather than an error.
+    # Drop ours before merging; the meter is the authority either way.
+    schedule = schedule.drop(
+        columns=["actual_mw", "deviation_mw"], errors="ignore"
+    )
+
     merged = schedule.merge(meter, on="timestamp", how="inner")
 
     if "is_real_measurement" in merged.columns:
