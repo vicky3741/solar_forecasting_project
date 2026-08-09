@@ -366,6 +366,7 @@ windy_scrape:
   enabled: true
   overlays: [solarpower, clouds, lclouds, mclouds, hclouds, rain, wind]
   output_dir: data/windy/values
+  features_dir: data/windy/features
   step_wait_ms: 900        # measured 600-900 ms for a step to load and render
   max_steps: 16            # 16 x 3h = 2 days; a run only ever needs today
   page_timeout_ms: 60000
