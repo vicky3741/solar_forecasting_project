@@ -222,18 +222,6 @@ def build(measurements, out_path):
             body,
         ))
 
-        story.append(Paragraph(
-            "The images are sent <b>in addition to</b>, not instead of, the "
-            "OpenCV numbers. Both describe the same sky: the numbers are "
-            "exact and cost nothing to compute (thin/thick cloud percentages, "
-            "texture entropy, optical-flow divergence and vorticity, quadrant "
-            "fractions), while the picture carries structure a summary "
-            "statistic cannot &mdash; where a front sits, whether cloud is "
-            "banded or scattered. The seven live calls below were made "
-            "<i>with</i> the images attached, so the output figures reflect a "
-            "real request rather than a text-only one.",
-            body,
-        ))
     else:
         story.append(Paragraph(
             "<b>No images are attached in this configuration.</b> The Windy "
@@ -435,32 +423,6 @@ def build(measurements, out_path):
         body,
     ))
 
-    story.append(Paragraph(
-        "The text prompt itself is cheap. Extra evidence &mdash; more "
-        "precedent, more history, more Windy columns &mdash; costs "
-        f"{rates['input'] / rates['output']:.2f} of what the equivalent "
-        "amount of extra reasoning costs. On these rates, giving the model "
-        "better information is roughly six times cheaper than letting it "
-        "think longer.",
-        note,
-    ))
-
-    if image_input:
-        story.append(Paragraph(
-            f"<b>Images are the costliest thing we can add to a prompt.</b> "
-            f"{images_n} screenshots are "
-            f"{image_input / text_input * 100:.0f}% as many tokens as the "
-            f"entire text prompt &mdash; every column, every retrieved case, "
-            f"every block of the day &mdash; and they are "
-            f"{image_cost / total_cost * 100:.0f}% of the bill. Each "
-            f"additional layer attached adds about "
-            f"{image_tokens / images_n * len(measurements['run_times_measured']):,.0f} "
-            f"tokens a day. Worth it only if the picture changes decisions "
-            f"the OpenCV numbers would not have changed, which is a question "
-            f"for the accuracy scoring rather than this report.",
-            note,
-        ))
-
     # ---------- 6. scaling ----------
     story.append(Paragraph("6. Scaling to Multiple Sites", h2))
 
@@ -509,30 +471,10 @@ def build(measurements, out_path):
         body,
     ))
 
-    story.append(Paragraph(
-        "<b>Free tier costs nothing in tokens.</b> The binding constraint is "
-        "the request count, not the token price — and at token prices "
-        f"this low ({rupees(day_cost)} per plant per day), the paid tier is "
-        "cheap insurance against losing a scheduling slot to a quota refusal.",
-        body,
-    ))
-
-    # ---------- footer ----------
-    story.append(Spacer(1, 8 * mm))
-
-    story.append(Paragraph(
-        f"Generated {date.today():%Y-%m-%d} from "
-        f"{measurements['prompts_measured']} measured production prompts "
-        f"({measurements['days_covered']} days) and {calls} live "
-        f"generateContent calls against <b>{model}</b>. "
-        "Token counts by Gemini countTokens and usage_metadata; prices read "
-        "from Google's published Gemini API pricing page on 2026-08-10; "
-        f"exchange rate from the {USD_TO_INR_SOURCE}. Confirm current rates "
-        "before financial commitments. Every figure here was measured for "
-        "this pipeline - none is carried over from any other report. "
-        "Source: tests/measure_token_cost.py, tests/build_token_cost_report.py.",
-        note,
-    ))
+    # Footer and the free-tier closing note removed at the user's
+    # request, 2026-08-10. The provenance they carried (which prompts,
+    # which calls, which pricing date) still lives in section 1 and in
+    # outputs/reports/token_measurements.json.
 
     document = SimpleDocTemplate(
         str(out_path), pagesize=A4,
