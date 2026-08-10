@@ -432,6 +432,32 @@ cloud DIRECTION is not measurable from it and is not reported."""
 
     # --------------------------------------------------
 
+    def track_record_section(self, run_time):
+        """
+        How each input has actually been performing lately
+        (modules/evaluation/input_skill.py).
+
+        This is what "let the model decide which input to trust" has to
+        mean if it is to mean anything. Asking the model which input it
+        relied on produces a confident answer and no information - it
+        cannot see last Tuesday, so it would be reporting a feeling.
+        Handing it measured error per input makes the judgement an
+        inference from evidence.
+        """
+
+        try:
+            from modules.evaluation.input_skill import InputSkill
+
+            section = InputSkill().prompt_section(run_time)
+
+        except Exception as error:
+            self.logger.warning(f"Input track record unavailable ({error})")
+            return None
+
+        return section
+
+    # --------------------------------------------------
+
     def build_prompt(self, features, run_time, ahead, satellite=None):
 
         table, _ = self.forecast_table(features, run_time)
@@ -441,6 +467,8 @@ cloud DIRECTION is not measurable from it and is not reported."""
         sky = self.satellite_section(satellite, run_time)
 
         precedent = self.precedent_section(features, ahead, run_time)
+
+        track_record = self.track_record_section(run_time)
 
         # Counted over the blocks actually IN the table, not over every
         # remaining block of the day. Windy's 3-hourly steps land at
@@ -474,6 +502,8 @@ CURRENT SKY OBSERVATION (satellite)
 
 WHAT HAPPENED IN SIMILAR SITUATIONS BEFORE
 {precedent}
+{("WHICH INPUTS HAVE BEEN RIGHT LATELY" + chr(10) + track_record + chr(10))
+ if track_record else ""}
 
 BLOCKS STILL TO SCHEDULE ({count} blocks, {first_block} to {last_block})
 {table}
@@ -712,6 +742,12 @@ the {count} blocks from {first_block} to {last_block}, in order, with no gaps.\
             "clearsky_power_mw": ahead["clearsky_power_mw"].to_numpy(),
             "windy_kt": ahead["windy_kt"].to_numpy(),
             "anchor_mw": anchor,
+            # Saved so modules/evaluation/input_skill.py can score each
+            # input separately later, without re-running anything.
+            "weather_kt": (
+                ahead["weather_kt"].to_numpy()
+                if "weather_kt" in ahead.columns else np.nan
+            ),
             "llm_raw_mw": np.clip(
                 kt * ahead["clearsky_power_mw"].to_numpy(dtype=float),
                 0.0, self.capacity_mw,
