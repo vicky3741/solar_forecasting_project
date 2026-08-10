@@ -24,7 +24,11 @@ Only Block / Time / Scheduled MW are written, matching what
 Evaluator.load_enercast_day expects; the revision/arrival
 provenance columns stay in the source xlsx.
 
-Run:  python -m tests.convert_frozen_enercast <frozen.xlsx> <YYYY-MM-DD>
+The frozen export arrives as .xlsx some days and as .csv on
+others (2026-08-10 came as CSV) - same columns either way, so
+the extension picks the reader and nothing else changes.
+
+Run:  python -m tests.convert_frozen_enercast <frozen.xlsx|.csv> <YYYY-MM-DD>
 =========================================================
 """
 
@@ -40,13 +44,16 @@ from config.config import settings
 def parse_args():
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("xlsx", help="the frozen Enercast export")
+    parser.add_argument("xlsx", help="the frozen Enercast export (.xlsx or .csv)")
     parser.add_argument("day", help="YYYY-MM-DD the export covers")
     return parser.parse_args()
 
 
 def read_frozen(path):
     """Block / Time / Scheduled MW out of the frozen export."""
+
+    if Path(path).suffix.lower() == ".csv":
+        return read_frozen_csv(path)
 
     worksheet = openpyxl.load_workbook(path, data_only=True).active
 
@@ -75,6 +82,30 @@ def read_frozen(path):
         })
 
     return pd.DataFrame(records).sort_values("Block").reset_index(drop=True)
+
+
+def read_frozen_csv(path):
+    """
+    Same three columns out of a CSV export. The provenance columns
+    (Source Revision / Arrival Time / Effective Time) are read and
+    discarded exactly as they are for the xlsx - they document HOW
+    the frozen value was resolved, and that resolution has already
+    happened by the time the export is written.
+    """
+
+    frame = pd.read_csv(path)
+
+    for required in ("Block", "Time", "Scheduled MW"):
+        if required not in frame.columns:
+            raise ValueError(f"{path}: missing required column {required!r}")
+
+    frame = frame[frame["Block"].notna()][["Block", "Time", "Scheduled MW"]].copy()
+
+    frame["Block"] = frame["Block"].astype(int)
+    frame["Time"] = frame["Time"].astype(str)
+    frame["Scheduled MW"] = frame["Scheduled MW"].astype(float)
+
+    return frame.sort_values("Block").reset_index(drop=True)
 
 
 def main():

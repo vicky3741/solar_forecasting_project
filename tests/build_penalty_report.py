@@ -266,6 +266,13 @@ def main():
     # trick below can reference it directly.
     headers += ["Lower Penalty Band (MW)", "Penalty Band Width (MW)"]
 
+    # The same free band expressed as a percentage of capacity, so the
+    # deviation-% chart can shade it too. In MW the band moves with the
+    # meter line; in % it is a FIXED -10..+10 corridor and every block
+    # inside it is a block that cost nothing - which is the single
+    # clearest way to see why a day's penalty is what it is.
+    headers += ["Free Band Lower (%)", "Free Band Width (%)"]
+
     last_col_letter = get_column_letter(len(headers))
 
     ws.merge_cells(f"A1:{last_col_letter}1")
@@ -419,8 +426,16 @@ def main():
     # matching the doc's step 3c). Band width formula ties back to installed
     # capacity (per spec point 6), not a hardcoded 0.51 - if capacity or the
     # slab-1 edge percentage ever changes, this moves with it.
-    band_lower_col = len(headers) - 1
-    band_width_col = len(headers)
+    # Located by header name rather than by counting back from the end,
+    # so adding a column later cannot silently shift the band series the
+    # charts point at.
+    band_lower_col = headers.index("Lower Penalty Band (MW)") + 1
+    band_width_col = headers.index("Penalty Band Width (MW)") + 1
+    free_lower_col = headers.index("Free Band Lower (%)") + 1
+    free_width_col = headers.index("Free Band Width (%)") + 1
+
+    slab1_pct = f"C{slab_rows['Slab 1']}"   # the free band's edge, in %
+
     for r in scored_rows:
         lower_cell = ws.cell(row=r, column=band_lower_col,
                               value=f"=D{r}-{cap_cell}*10/100")
@@ -428,6 +443,13 @@ def main():
         width_cell = ws.cell(row=r, column=band_width_col,
                               value=f"={cap_cell}*10/100*2")
         width_cell.number_format = "0.000"
+
+        # Same slab-1 edge the penalty formula uses, so the shaded
+        # corridor cannot drift out of step with what is charged.
+        free_lower = ws.cell(row=r, column=free_lower_col, value=f"=-{slab1_pct}")
+        free_lower.number_format = "0.0"
+        free_width = ws.cell(row=r, column=free_width_col, value=f"={slab1_pct}*2")
+        free_width.number_format = "0.0"
 
     # ---------------- day summary ----------------
     srow = last_row + 2
@@ -622,6 +644,11 @@ def main():
     # axis on the 2026-07-28/29 rebuild.
     line.x_axis.delete = False
     line.y_axis.delete = False
+    # Excel draws category labels ON the axis line, and this axis crosses
+    # at 0 with the band reaching well below it - so by default the times
+    # print straight through the shaded band in the middle of the plot.
+    # "low" pins them under the plot area where they belong.
+    line.x_axis.tickLblPos = "low"
 
     # Combine so the band renders as shading BEHIND the schedule/actual
     # lines, not a separate chart - band first puts it at the back.
@@ -637,9 +664,14 @@ def main():
     band.x_axis.title = line.x_axis.title
     band.x_axis.delete = line.x_axis.delete
     band.y_axis.delete = line.y_axis.delete
+    band.x_axis.tickLblPos = line.x_axis.tickLblPos
     band.legend.position = line.legend.position
-    # idx 0 = lower_series, the invisible band-anchor series - hide it from
-    # the legend so only "Allowed Band" (idx 1) shows for the shaded area.
+    # idx 0 = lower_series, the invisible band-anchor series - ask for it to
+    # be hidden so only "Allowed Band" (idx 1) shows for the shaded area.
+    # Excel IGNORES this on a combined chart (verified 2026-08-11: the entry
+    # is written correctly into the XML and still renders), so the anchor is
+    # actually removed from the legend by tests/recalc.py, which drives Excel
+    # itself. This stays for viewers that do honour it.
     band.legend.legendEntry = [LegendEntry(idx=0, delete=True)]
 
     band += line
@@ -675,8 +707,77 @@ def main():
 
     bar.x_axis.delete = False
     bar.y_axis.delete = False
+    bar.x_axis.tickLblPos = "low"
 
     ws.add_chart(bar, f"{chart_col}26")
+
+    # ---- deviation against the free band, in % of capacity ----
+    # The MW chart above answers "did we follow the plant?"; this one
+    # answers "did it cost anything?". Anything inside the shaded
+    # corridor is slab 1 - free - and every excursion outside it is
+    # exactly the blocks the bar chart is charging for, so the three
+    # charts read as one story rather than three separate views.
+    free_band = AreaChart()
+    free_band.grouping = "stacked"
+    free_band.overlap = 100
+
+    free_data = Reference(ws, min_col=free_lower_col, max_col=free_width_col,
+                          min_row=HEAD, max_row=last_row)
+    free_band.add_data(free_data, titles_from_data=True)
+    free_band.set_categories(cats)
+
+    free_lower_series, free_width_series = free_band.series
+    free_lower_series.graphicalProperties.noFill = True
+    free_lower_series.graphicalProperties.line.noFill = True
+    free_width_series.graphicalProperties.solidFill = "DDEBDD"
+    free_width_series.graphicalProperties.line.noFill = True
+    free_width_series.tx = SeriesLabel(v="Free Band - no penalty (+/-10% capacity)")
+
+    dev_line = LineChart()
+    dev_line.title = f"Deviation vs Free Penalty Band (% of capacity) - {day}{title_label}"
+    dev_line.height, dev_line.width = 8, 24
+    dev_line.y_axis.title = "% of capacity"
+    dev_line.x_axis.title = None
+
+    dev_data = Reference(ws, min_col=6, max_col=6, min_row=HEAD, max_row=last_row)
+    dev_line.add_data(dev_data, titles_from_data=True)
+
+    if has_enercast:
+        ec_dev_data = Reference(ws, min_col=11, max_col=11, min_row=HEAD, max_row=last_row)
+        dev_line.add_data(ec_dev_data, titles_from_data=True)
+
+    dev_line.set_categories(cats)
+    dev_line.legend.position = "r"
+
+    for series, (colour, dash) in zip(dev_line.series,
+                                      (("1F4E9C", None), ("2E7D32", "dash"))):
+        series.smooth = False
+        series.graphicalProperties.line.solidFill = colour
+        series.graphicalProperties.line.width = 20000
+        if dash:
+            series.graphicalProperties.line.dashStyle = dash
+        series.marker.symbol = "none"
+
+    dev_line.x_axis.delete = False
+    dev_line.y_axis.delete = False
+    # This axis crosses at 0 with the whole plot straddling it, so the
+    # times land across the middle of the chart unless pinned low.
+    dev_line.x_axis.tickLblPos = "low"
+
+    # Same merge as the MW band chart - see the note there for why this
+    # must be += and why the axes/legend are copied onto the survivor.
+    free_band.title = dev_line.title
+    free_band.height, free_band.width = dev_line.height, dev_line.width
+    free_band.y_axis.title = dev_line.y_axis.title
+    free_band.x_axis.title = dev_line.x_axis.title
+    free_band.x_axis.delete = dev_line.x_axis.delete
+    free_band.y_axis.delete = dev_line.y_axis.delete
+    free_band.x_axis.tickLblPos = dev_line.x_axis.tickLblPos
+    free_band.legend.position = dev_line.legend.position
+    free_band.legend.legendEntry = [LegendEntry(idx=0, delete=True)]
+
+    free_band += dev_line
+    ws.add_chart(free_band, f"{chart_col}45")
 
     ws.column_dimensions["A"].width = 8
     ws.column_dimensions["B"].width = 15
