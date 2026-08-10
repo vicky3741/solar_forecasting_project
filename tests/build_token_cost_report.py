@@ -206,11 +206,15 @@ def build(measurements, out_path):
     ))
 
     story.append(Paragraph(
-        "<b>No images are sent.</b> The satellite clip is reduced to numbers "
-        "by OpenCV before the call &mdash; thin/thick cloud percentages, "
-        "texture entropy, optical-flow divergence &mdash; so the model reads "
-        "measurements rather than pictures. This removes the image-token cost "
-        "entirely.",
+        "<b>Images are captured, but never sent.</b> The pipeline does record "
+        "the Windy satellite clip and the layer screenshots &mdash; Playwright "
+        "writes them to disk at each scheduling time. OpenCV then reads those "
+        "files <i>locally</i> and reduces them to numbers: thin/thick cloud "
+        "percentages, texture entropy, optical-flow divergence and vorticity, "
+        "quadrant cloud fractions. Only those numbers enter the prompt, as "
+        "text. The image files themselves are never uploaded to the API, so "
+        "they contribute zero input tokens. The vision work happens on our "
+        "own machine, at no per-token cost.",
         body,
     ))
 
@@ -301,13 +305,39 @@ def build(measurements, out_path):
         body,
     ))
 
-    rows = [["Period", "Cost (USD)", "Cost (INR, approx)"]]
+    # Unit price per SINGLE token, since the per-million figure is hard
+    # to hold against a daily volume of a few tens of thousands.
+    in_per_token = rates["input"] / 1e6
+    out_per_token = rates["output"] / 1e6
+
+    story.append(Paragraph(
+        f"Per single token that is "
+        f"<b>${in_per_token:.9f}</b> input "
+        f"(Rs {in_per_token * USD_TO_INR:.9f}, or "
+        f"{in_per_token * USD_TO_INR * 100:.5f} paise) and "
+        f"<b>${out_per_token:.9f}</b> output "
+        f"(Rs {out_per_token * USD_TO_INR:.9f}, or "
+        f"{out_per_token * USD_TO_INR * 100:.5f} paise). "
+        f"Output costs <b>{rates['output'] / rates['input']:.0f}× "
+        f"more per token than input</b>, which is what makes the output "
+        f"side of this pipeline the whole story.",
+        body,
+    ))
+
+    rows = [["Period", "Input cost", "Output cost", "Total (USD)",
+             "Total (INR)"]]
 
     for label, days in periods:
-        usd = cost(daily_input * days, daily_output * days)
-        rows.append([label, money(usd), rupees(usd)])
 
-    story.append(table(rows, [50 * mm, 40 * mm, 45 * mm]))
+        in_usd = daily_input * days / 1e6 * rates["input"]
+        out_usd = daily_output * days / 1e6 * rates["output"]
+
+        rows.append([
+            label, money(in_usd), money(out_usd),
+            money(in_usd + out_usd), rupees(in_usd + out_usd),
+        ])
+
+    story.append(table(rows, [38 * mm, 28 * mm, 28 * mm, 30 * mm, 34 * mm]))
 
     day_cost = cost(daily_input, daily_output)
 
@@ -319,57 +349,60 @@ def build(measurements, out_path):
     ))
 
     # ---------- 5. model choice ----------
-    story.append(Paragraph("5. Effect of Model Choice", h2))
+    story.append(Paragraph("5. What Drives the Cost", h2))
 
-    chain = configured_models()
+    in_cost = daily_input / 1e6 * rates["input"]
+    out_cost = daily_output / 1e6 * rates["output"]
+    total_cost = in_cost + out_cost
+
+    thinking_cost = (
+        output["daily_thinking_tokens"] / 1e6 * rates["output"]
+    )
+    visible_cost = (
+        output["daily_visible_output_tokens"] / 1e6 * rates["output"]
+    )
+
+    rows = [["Component", "Tokens/day", "Cost/day (USD)", "Share of bill"]]
+
+    for label, tokens, spend in (
+        ("Input — the prompt", daily_input, in_cost),
+        ("Output — visible answer", output["daily_visible_output_tokens"],
+         visible_cost),
+        ("Output — thinking (never shown)",
+         output["daily_thinking_tokens"], thinking_cost),
+    ):
+        rows.append([
+            label, f"{tokens:,.0f}", money(spend),
+            f"{spend / total_cost * 100:.1f}%",
+        ])
+
+    rows.append([
+        "TOTAL", f"{daily_total:,.0f}", money(total_cost), "100.0%"
+    ])
+
+    story.append(table(rows, [62 * mm, 30 * mm, 34 * mm, 30 * mm]))
 
     story.append(Paragraph(
-        "The same measured token volume, priced against the models "
-        "<b>this pipeline is configured to call</b> &mdash; its primary and "
-        "its fallback chain, in order. The output rate is what decides the "
-        "bill, because thinking tokens make output "
-        f"{daily_output / daily_input:.1f}× the input volume.",
+        f"<b>Three quarters of the bill is reasoning nobody reads.</b> "
+        f"Thinking tokens are {thinking_cost / total_cost * 100:.0f}% of the "
+        f"total spend. Two effects compound to produce that: the model emits "
+        f"{ratio:.1f}× more thinking than visible answer, and every output "
+        f"token costs {rates['output'] / rates['input']:.0f}× what an input "
+        f"token costs. The visible JSON schedule &mdash; the thing the plant "
+        f"actually uses &mdash; is only "
+        f"{visible_cost / total_cost * 100:.0f}% of what is paid for.",
         body,
     ))
 
-    rows = [["Model (call order)", "$/1M in", "$/1M out", "Cost/year (USD)",
-             "Cost/year (INR)"]]
-
-    unpriced = []
-
-    for position, name in enumerate(chain, start=1):
-
-        rate = PRICING.get(name)
-
-        label = f"{position}. {name}" + (" — in use" if name == model else "")
-
-        if rate is None:
-            unpriced.append(name)
-            rows.append([label, "not published", "not published", "—", "—"])
-            continue
-
-        usd = (
-            daily_input * 365 / 1e6 * rate["input"]
-            + daily_output * 365 / 1e6 * rate["output"]
-        )
-
-        rows.append([
-            label, f"${rate['input']:.2f}", f"${rate['output']:.2f}",
-            money(usd), rupees(usd),
-        ])
-
-    story.append(table(rows, [58 * mm, 22 * mm, 24 * mm, 30 * mm, 32 * mm]))
-
-    if unpriced:
-        story.append(Paragraph(
-            f"<b>{len(unpriced)} fallback model(s)</b> "
-            f"({', '.join(unpriced)}) carry no published rate on Google's "
-            "pricing page and are left blank rather than filled with a "
-            "plausible figure. They are reached only after earlier models "
-            "exhaust their free-tier request cap, so on the paid tier they "
-            "would not normally be called at all.",
-            note,
-        ))
+    story.append(Paragraph(
+        "The prompt itself is cheap. Sending more evidence &mdash; more "
+        "precedent, more input history, more Windy layers &mdash; costs "
+        f"{rates['input'] / rates['output']:.2f} of what an equivalent "
+        "amount of extra reasoning costs. On these rates, giving the model "
+        "better information is roughly six times cheaper than letting it "
+        "think longer.",
+        note,
+    ))
 
     # ---------- 6. scaling ----------
     story.append(Paragraph("6. Scaling to Multiple Sites", h2))
