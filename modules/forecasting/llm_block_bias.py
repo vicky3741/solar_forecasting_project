@@ -72,10 +72,20 @@ class LLMBlockBias:
         fusion = settings.get("fusion", {})
         cfg = settings.get("block_bias_correction", {})
 
-        self.enabled = fusion.get("block_bias", True)
+        # Block SHAPE correction is off by default: measured to be worth
+        # Rs 291 alone and to make things WORSE when combined with the
+        # level correction, which is worth Rs 1,407. See learn_level.
+        self.enabled = fusion.get("block_bias", False)
 
         # Measured on this pipeline, not inherited from production.
         self.strength = float(fusion.get("block_bias_strength", 0.25))
+
+        self.level_enabled = fusion.get("level_calibration", True)
+        self.level_strength = float(fusion.get("level_strength", 0.55))
+        self.level_bounds = tuple(
+            fusion.get("level_bounds", [0.5, 1.5])
+        )
+        self.min_level_blocks = int(fusion.get("min_level_blocks", 20))
 
         self.lookback_days = cfg.get("lookback_days", 5)
         self.smooth_blocks = cfg.get("smooth_blocks", 6)
@@ -197,6 +207,88 @@ class LLMBlockBias:
     def available(self):
 
         return bool(self.profile)
+
+    # --------------------------------------------------
+
+    def learn_level(self, as_of):
+        """
+        One multiplier for the whole day: total actual over total
+        scheduled across recent finished days. Team 1's step 9 - "0.7
+        means the formula has been running 30% too high".
+
+        MEASURED TO BE THE BETTER OF THE TWO CORRECTIONS HERE, and they
+        do not stack. tests/whatif_correction.py over 12 walk-forward
+        days:
+
+            no correction                     Rs 27,663
+            block shape 0.25 alone            Rs 27,371
+            level 0.55 alone                  Rs 26,256
+            level 0.55 + shape 0.15           Rs 26,563
+            level 0.55 + shape 0.25           Rs 26,924
+
+        Level alone is worth five times the shape alone, and adding the
+        shape on top makes it worse - the level factor already absorbs
+        the systematic bias the shape correction was picking up, so
+        applying both corrects the same error twice.
+
+        That is the opposite of the production blend, where a flat
+        whole-day shift made the penalty worse and only the shape
+        helped. The difference is what each model gets wrong: production
+        misses by time of day, this one misses by level - its recent
+        daily bias ran -105.9 and -157.68 MW-blocks, the same direction
+        both days.
+
+        Returns None below `min_blocks`, so a ratio built from a handful
+        of blocks cannot rescale a whole day.
+        """
+
+        frames = self.history(pd.Timestamp(as_of).date())
+
+        if len(frames) < self.min_days:
+            return None
+
+        combined = pd.concat(frames, ignore_index=True)
+
+        if len(combined) < self.min_level_blocks:
+            return None
+
+        scheduled = float(combined["forecast_mw"].sum())
+
+        if scheduled <= 0:
+            return None
+
+        ratio = float(combined["actual_mw"].sum()) / scheduled
+
+        return float(np.clip(ratio, *self.level_bounds))
+
+    # --------------------------------------------------
+
+    def apply_level(self, schedule, as_of, column="forecast_mw"):
+        """
+        Scales the whole schedule toward the recent actual/scheduled
+        ratio. `level_strength` of 1.0 applies the full ratio; 0.55 is
+        the measured optimum, on a flat plateau from about 0.55 to 0.60.
+        """
+
+        factor = self.learn_level(as_of)
+
+        if factor is None or not self.level_enabled:
+            return schedule, None
+
+        schedule = schedule.copy()
+
+        scale = 1 + self.level_strength * (factor - 1)
+
+        schedule[column] = np.clip(
+            schedule[column].to_numpy() * scale, 0.0, CAPACITY_MW
+        )
+
+        self.logger.info(
+            f"Level calibration: recent actual/scheduled {factor:.3f}, "
+            f"applied at strength {self.level_strength} -> x{scale:.3f}"
+        )
+
+        return schedule, factor
 
     # --------------------------------------------------
 

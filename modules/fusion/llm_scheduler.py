@@ -990,12 +990,19 @@ RESPOND WITH JSON ONLY, no prose outside it, in exactly this form:
         # subject to the same range, deviation and smoothness checks as
         # anything else. A correction that could push a block outside
         # those bounds would be a second unchecked author.
+        # Level calibration first, then the block shape - and by default
+        # only the level one runs. Measured: level alone Rs 26,256,
+        # shape alone Rs 27,371, both together Rs 26,563-26,924 against
+        # a Rs 27,663 baseline. They are learned from the same residuals,
+        # so applying both corrects the same error twice.
+        schedule, level_factor = self.block_bias.apply_level(schedule, run_time)
+
         self.block_bias.load(as_of=run_time)
 
         if self.block_bias.available:
             schedule = self.block_bias.apply(schedule)
             self.logger.info(
-                "Block bias applied "
+                "Block shape bias applied "
                 f"(learned from {self.block_bias.days_used} day(s))"
             )
 

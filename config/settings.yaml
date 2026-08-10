@@ -477,8 +477,32 @@ fusion:
   # Clean minimum at 0.25, saving Rs 291, and monotonic harm past it.
   # Production can afford 0.5 because its error has a steadier
   # time-of-day shape; this model's is more erratic.
-  block_bias: true
+  # MEASURED over 12 walk-forward days (tests/whatif_correction.py):
+  #
+  #   no correction                     Rs 27,663
+  #   block shape 0.25 alone            Rs 27,371   (-Rs 291)
+  #   level 0.55 alone                  Rs 26,256   (-Rs 1,407)
+  #   level 0.55 + shape 0.15           Rs 26,563
+  #   level 0.55 + shape 0.25           Rs 26,924
+  #
+  # The level correction is worth five times the shape one, and the two
+  # do NOT stack - both are learned from the same residuals, so applying
+  # each corrects the same error twice. Shape is therefore OFF.
+  #
+  # Opposite of the production blend, where a flat whole-day shift made
+  # the penalty worse and only the block shape helped. Different models
+  # miss differently: production misses by time of day, this one misses
+  # by level.
+  block_bias: false
   block_bias_strength: 0.25
+
+  # One multiplier for the whole day: recent total actual over total
+  # scheduled, bounded, applied at `level_strength`. 0.55 sits on a flat
+  # optimum plateau running to about 0.60.
+  level_calibration: true
+  level_strength: 0.55
+  level_bounds: [0.5, 1.5]
+  min_level_blocks: 20
   # Lower than the vision prompt's 0.2: a schedule should not change
   # because the sampler rolled differently, and the freeze horizon makes
   # run-to-run jitter expensive.

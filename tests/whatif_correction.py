@@ -140,7 +140,43 @@ def learn_profile(history, smooth_blocks=6, max_shift_mw=1.0):
     return profile.clip(-max_shift_mw, max_shift_mw).to_dict()
 
 
-def price(by_day, meter, strength, lookback, smooth_blocks, min_days):
+def learn_level(history, bounds=(0.5, 1.5), min_blocks=20):
+    """
+    A single multiplier: total actual over total scheduled across the
+    history. Team 1's step 9 - "0.7 means the formula has been running
+    30% too high, on average".
+
+    Deliberately ONE number, where learn_profile gives one per block.
+    They fix different things: a level correction moves the whole day,
+    a shape correction moves the hours differently. The production
+    pipeline's control test found a flat whole-day shift made its
+    penalty WORSE while the block shape helped, so the two must be
+    priced separately rather than assumed to compose.
+
+    Returns None below `min_blocks`, which keeps a ratio built from a
+    handful of blocks from rescaling a whole day.
+    """
+
+    if not history:
+        return None
+
+    combined = pd.concat(history, ignore_index=True)
+
+    if len(combined) < min_blocks:
+        return None
+
+    scheduled = float(combined["scheduled_mw"].sum())
+
+    if scheduled <= 0:
+        return None
+
+    ratio = float(combined["actual_mw"].sum()) / scheduled
+
+    return float(np.clip(ratio, *bounds))
+
+
+def price(by_day, meter, strength, lookback, smooth_blocks, min_days,
+          candidate="block-bias", shape_strength=0.25):
     """
     Total penalty with the correction applied walk-forward, and without.
     """
@@ -161,19 +197,68 @@ def price(by_day, meter, strength, lookback, smooth_blocks, min_days):
             (frame["actual_mw"] - frame["scheduled_mw"]).map(dsm_penalty).sum()
         )
 
-        profile = (
-            learn_profile(history[-lookback:], smooth_blocks)
-            if len(history) >= min_days else {}
-        )
+        corrected = frame["scheduled_mw"].to_numpy()
+        applied = False
 
-        if profile:
-            shift = frame["block"].map(profile).fillna(0.0).to_numpy()
-            corrected = np.clip(
-                frame["scheduled_mw"].to_numpy() + strength * shift,
-                0.0, CAPACITY_MW,
+        # BOTH, in the order the pipeline would apply them: level first,
+        # then shape. They fix different things, but they are learned
+        # from the SAME residuals, so some of what the level correction
+        # removes is residual the shape correction would also have
+        # removed. Applying both is not the sum of applying each - which
+        # is why this is priced rather than assumed.
+        if candidate == "both":
+
+            factor = (
+                learn_level(history[-lookback:])
+                if len(history) >= min_days else None
             )
+
+            if factor is not None:
+                corrected = np.clip(
+                    corrected * (1 + strength * (factor - 1)),
+                    0.0, CAPACITY_MW,
+                )
+                applied = True
+
+            profile = (
+                learn_profile(history[-lookback:], smooth_blocks)
+                if len(history) >= min_days else {}
+            )
+
+            if profile:
+                shift = frame["block"].map(profile).fillna(0.0).to_numpy()
+                corrected = np.clip(
+                    corrected + shape_strength * shift, 0.0, CAPACITY_MW
+                )
+                applied = True
+
+        elif candidate == "level":
+
+            factor = (
+                learn_level(history[-lookback:])
+                if len(history) >= min_days else None
+            )
+
+            if factor is not None:
+                corrected = np.clip(
+                    corrected * (1 + strength * (factor - 1)),
+                    0.0, CAPACITY_MW,
+                )
+                applied = True
+
         else:
-            corrected = frame["scheduled_mw"].to_numpy()
+
+            profile = (
+                learn_profile(history[-lookback:], smooth_blocks)
+                if len(history) >= min_days else {}
+            )
+
+            if profile:
+                shift = frame["block"].map(profile).fillna(0.0).to_numpy()
+                corrected = np.clip(
+                    corrected + strength * shift, 0.0, CAPACITY_MW
+                )
+                applied = True
 
         after = float(
             pd.Series(frame["actual_mw"].to_numpy() - corrected)
@@ -186,7 +271,7 @@ def price(by_day, meter, strength, lookback, smooth_blocks, min_days):
             "penalty_before": before,
             "penalty_after": after,
             "change_rs": after - before,
-            "corrected": bool(profile),
+            "corrected": applied,
         })
 
         # History is appended AFTER scoring, so the profile that
@@ -205,6 +290,18 @@ def main():
     parser.add_argument("--strength", type=float, default=None)
     parser.add_argument("--lookback", type=int, default=None)
     parser.add_argument("--smooth", type=int, default=None)
+    parser.add_argument(
+        "--candidate", default="block-bias",
+        choices=("block-bias", "level", "both"),
+        help="block-bias = one shift per block (time-of-day shape); "
+             "level = one multiplier for the whole day; both = level "
+             "then shape, as the pipeline would apply them"
+    )
+    parser.add_argument(
+        "--shape-strength", type=float, default=0.25,
+        help="strength of the block-shape part when --candidate both "
+             "(--strength then sets the level part)"
+    )
 
     args = parser.parse_args()
 
@@ -235,13 +332,22 @@ def main():
         if run_time is not None:
             by_day.setdefault(run_time.date(), []).append(path)
 
-    results = price(by_day, meter, strength, lookback, smooth, min_days)
+    results = price(
+        by_day, meter, strength, lookback, smooth, min_days,
+        args.candidate, args.shape_strength,
+    )
 
     if results.empty:
         raise SystemExit("Nothing could be priced.")
 
+    title = (
+        "anchor self-correction (one multiplier for the whole day)"
+        if args.candidate == "level"
+        else "block bias correction (one shift per block)"
+    )
+
     print("=" * 86)
-    print("CANDIDATE: block bias correction")
+    print(f"CANDIDATE: {title}")
     print(f"  strength {strength}, lookback {lookback} days, "
           f"smoothed +/-{smooth} blocks, needs {min_days} days of history")
     print("  walk-forward: each day corrected only by days strictly before it")
