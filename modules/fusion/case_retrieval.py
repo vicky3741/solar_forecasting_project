@@ -51,10 +51,11 @@ any weather".
 LEAKAGE
 -------
 Theirs excludes cases with the same timestamp as the query.
-Ours excludes the whole QUERY DAY, which is stricter and has
-to be: every accuracy claim in this project is scored
-walk-forward by day, so a case from this morning would let the
-model see part of the answer to this afternoon.
+Ours keeps only days STRICTLY BEFORE the query day, which is
+stricter and has to be: every accuracy claim in this project is
+scored walk-forward by day, so a case from this morning would
+let the model see part of the answer to this afternoon - and a
+case from next week would hand it the answer outright.
 =========================================================
 """
 
@@ -143,7 +144,15 @@ class CaseRetriever:
         cases = store
 
         if exclude_date is not None:
-            cases = cases[cases["date"].dt.date != pd.Timestamp(exclude_date).date()]
+            # STRICTLY BEFORE, not "any day except this one". The case
+            # store is built once over the whole period, so it holds
+            # days AFTER the run being backtested - and `!=` let a run
+            # on Aug 1 retrieve precedent, with actuals attached, from
+            # Aug 5. That is lookahead, and it flatters every historical
+            # score. A live run has no future days in the store, so this
+            # only ever tightens the backtest; it cannot change
+            # production behaviour.
+            cases = cases[cases["date"].dt.date < pd.Timestamp(exclude_date).date()]
 
         if cases.empty:
             return pd.DataFrame()
