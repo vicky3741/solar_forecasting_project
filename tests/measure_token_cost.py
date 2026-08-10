@@ -95,6 +95,12 @@ def main():
         help="also make ONE real call to read output and thinking tokens"
     )
     parser.add_argument("--out", default="outputs/reports/token_measurements.json")
+    parser.add_argument(
+        "--model", default=None,
+        help="measure a different model than the configured one. Token "
+             "counts and thinking volume are model-specific, so switching "
+             "models means re-measuring, not re-pricing the old numbers."
+    )
 
     args = parser.parse_args()
 
@@ -106,7 +112,7 @@ def main():
     from modules.vision.gemini_client import GeminiClient
 
     gemini = GeminiClient()
-    model = gemini.model
+    model = args.model or settings.get("fusion", {}).get("model") or gemini.model
 
     print("=" * 78)
     print("TOKEN MEASUREMENT")

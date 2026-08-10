@@ -392,6 +392,26 @@ windy_scrape:
 # The new approach's final stage: the LLM reads the per-block feature
 # table and decides the schedule (modules/fusion/llm_scheduler.py).
 fusion:
+  # WHICH MODEL DECIDES THE SCHEDULE. Deliberately separate from
+  # vision.model, which the live vision path uses - the two jobs send
+  # different things (image frames vs a numeric table) and measure
+  # differently, so they are chosen independently.
+  #
+  # gemini-3.6-flash, measured against gemini-3.5-flash on the SAME 83
+  # saved prompts (tests/measure_token_cost.py, 2026-08-10):
+  #
+  #                        3.5-flash   3.6-flash
+  #   thinking tokens/day     21,307      13,659   -36%
+  #   billable output/day     24,751      17,164   -31%
+  #   $/1M output              $9.00       $7.50   -17%
+  #   cost/year               $93.00      $58.68   -37%
+  #
+  # Cheaper twice over: a lower rate AND less reasoning to bill. The
+  # name is pinned rather than using gemini-flash-latest, which
+  # currently resolves here but could move to another model silently.
+  # Verified callable on this key before being set.
+  model: gemini-3.6-flash
+
   # What the model returns per block.
   #   kt  - clear-sky index 0-1.2, multiplied here by the pvlib clear-sky
   #         curve to get MW. The model still decides every block; it just

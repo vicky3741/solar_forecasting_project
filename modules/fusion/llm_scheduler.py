@@ -104,6 +104,13 @@ class LLMScheduler:
 
         fusion = settings.get("fusion", {})
 
+        # Chosen separately from vision.model, which the live vision path
+        # uses. Measured 2026-08-10: gemini-3.6-flash produces 36% less
+        # thinking than gemini-3.5-flash on this same prompt AND is priced
+        # lower per output token, so it is both cheaper and less verbose
+        # for this job.
+        self.model = fusion.get("model") or settings["vision"]["model"]
+
         self.output_mode = fusion.get("llm_output", "kt")
         self.max_kt = fusion.get("max_clear_sky_index", 1.2)
 
@@ -764,6 +771,7 @@ RESPOND WITH JSON ONLY, no prose outside it, in exactly this form:
             prompt,
             temperature=self.temperature,
             max_output_tokens=self.max_output_tokens,
+            model=self.model,
         )
 
         payload = self.parser.parse(response)

@@ -107,7 +107,8 @@ class GeminiClient:
 
     # --------------------------------------------------
 
-    def generate_text(self, prompt, temperature=None, max_output_tokens=None):
+    def generate_text(self, prompt, temperature=None, max_output_tokens=None,
+                      model=None):
         """
         A plain text-in / text-out call, sharing every protection the
         frame path already has: per-model daily-quota detection, the
@@ -135,11 +136,16 @@ class GeminiClient:
             ),
         )
 
-        return self.call_with_fallback([prompt], config)
+        # `model` lets the scheduling pipeline pick its own model without
+        # touching vision.model, which the LIVE vision path also reads.
+        # The two jobs have different needs: the vision path sends image
+        # frames, this one sends a numeric table, and their token costs
+        # and thinking volumes differ enough to be chosen separately.
+        return self.call_with_fallback([prompt], config, primary=model)
 
     # --------------------------------------------------
 
-    def call_with_fallback(self, contents, config):
+    def call_with_fallback(self, contents, config, primary=None):
         # The free tier returns 503 ("model is currently experiencing
         # high demand") in bursts - on 2026-07-23 that cost the vision
         # signal on all three runs of the day, because a single refusal
@@ -152,8 +158,12 @@ class GeminiClient:
         # on 2026-07-30 the whole day's vision was lost to a 20-requests
         # -per-day cap while the log said only "Gemini busy", which hid
         # the real cause for days. It is now named and raised at once.
+        head = primary or self.model
+
         candidates = [
-            name for name in [self.model, *self.fallback_models]
+            name for name in
+            [head, *[m for m in [self.model, *self.fallback_models]
+                     if m != head]]
             if name not in self.exhausted
         ]
 
