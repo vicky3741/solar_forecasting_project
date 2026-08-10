@@ -70,7 +70,8 @@ from utils.logger import get_logger
 # every extra column is tokens spent and one more thing to be
 # distracted by, and these are the ones that carry the decision.
 _PROMPT_COLUMNS = [
-    "block", "time", "clearsky_power_mw", "weather_kt", "windy_kt",
+    "block", "time", "clearsky_power_mw", "anchor_kt",
+    "weather_kt", "windy_kt",
     "windy_clouds_pct", "windy_lclouds_pct", "windy_mclouds_pct",
     "windy_hclouds_pct", "windy_rain_mm", "windy_is_measured",
 ]
@@ -282,10 +283,23 @@ class LLMScheduler:
         ahead = features[
             (features["timestamp"] > run_time)
             & (features["is_daylight"] == 1)
-        ]
+        ].copy()
 
         if ahead.empty:
             return "", ahead
+
+        # The anchor has to be IN the table, because the model is now
+        # asked to adjust it rather than to invent a number. Shown as a
+        # clear-sky index so it is on the same scale as everything else
+        # it is being compared against.
+        anchor = self.anchor_mw(features, ahead)
+        clearsky = ahead["clearsky_power_mw"].to_numpy(dtype=float)
+
+        ahead["anchor_kt"] = np.divide(
+            anchor, clearsky,
+            out=np.full(len(ahead), np.nan),
+            where=clearsky > 0.01,
+        )
 
         columns = [c for c in _PROMPT_COLUMNS if c in ahead.columns]
 
@@ -512,6 +526,10 @@ HOW TO READ THE COLUMNS
 - clearsky_power_mw: what this plant produces under a perfectly clear sky at \
 that moment. Exact physics from pvlib - solar geometry, tilt and capacity. \
 Treat it as ground truth for the SHAPE of the day.
+- anchor_kt: THE NUMBER YOU ARE ADJUSTING. It is today's last measured \
+cloudiness, decaying toward the day's average as the horizon grows. Over the \
+last twelve days this anchor alone was the most accurate thing available, so \
+departing from it needs a reason you can name.
 - weather_kt: the ECMWF weather forecast for this location, as a fraction of \
 clear sky, already corrected for its recent measured bias at this plant. This \
 is the ONLY input that knows about weather still to come, so it should carry \
@@ -531,79 +549,116 @@ only updates every 3 hours, so today only {measured} of the remaining blocks \
 carry a real reading. Trust the 1s; treat the 0s as a smooth guess between them.
 
 YOUR JOB
-For every block listed above, decide the {wanted} you expect. Weigh what the \
-plant has actually been doing today against what Windy forecasts. Where the two \
-disagree, say which you trusted and why. Cloud fields move, so a change Windy \
-shows at one reading usually arrives gradually across the blocks around it \
-rather than instantly.
+Each block above already has an anchor - the physics baseline, listed as \
+anchor_kt. Your job is to ADJUST each anchor using the evidence above, NOT to \
+invent a new number independently of it. Start from the anchor and move it only \
+where something in the evidence justifies moving it.
+
+Weigh what the plant has actually been doing today against what the forecasts \
+say. Where they disagree, say which you trusted and why. Cloud fields move, so \
+a change one reading shows usually arrives gradually across the blocks around \
+it rather than instantly.
 
 Being wrong is penalised in both directions - over-forecasting costs the plant \
 money in deviation charges just as under-forecasting does. Do not pad the \
 number for safety.
 
+Give each block its own confidence, and be honest with it. "high" means the \
+evidence genuinely points one way; "low" means you are guessing, and a low \
+confidence block will be pulled back toward the anchor rather than published as \
+you wrote it. Marking everything high does not make your numbers count more, it \
+only removes the safety net where you needed it.
+
 RESPOND WITH JSON ONLY, no prose outside it, in exactly this form:
 {{
   "regime": "clear" | "partly_cloudy" | "overcast" | "storm",
-  "confidence": 0.0-1.0,
   "reasoning": "2-4 sentences on what drove the decision",
-  "blocks": [[{first_block}, 0.00], [{first_block + 1}, 0.00], ...]
+  "blocks": [
+    [{first_block}, 0.00, "high"],
+    [{first_block + 1}, 0.00, "medium"],
+    ...
+  ]
 }}
 
-"blocks" must be a list of [block_number, value] pairs covering every one of \
-the {count} blocks from {first_block} to {last_block}, in order, with no gaps.\
+"blocks" must cover every one of the {count} blocks from {first_block} to \
+{last_block}, in order, with no gaps. Each entry is \
+[block_number, {wanted}, confidence] where confidence is "high", "medium" or \
+"low". Any block you omit will be published at its anchor value.\
 """
 
     # --------------------------------------------------
 
+    # How much of the model's number survives, per confidence level.
+    # Adopted from Kushal's Windy-Project-3, which returns High/Medium/
+    # Low per block; ours turns that into a blend weight rather than
+    # only a label, so a block the model is unsure about is genuinely
+    # pulled back toward the anchor instead of merely being annotated.
+    CONFIDENCE_WEIGHT = {"high": 0.8, "medium": 0.5, "low": 0.2}
+
     def parse_blocks(self, payload, ahead):
         """
-        The model's block list -> a kt value per forecast block.
+        The model's block list -> (values, per-block weights).
 
-        Missing blocks are filled by interpolating the ones that did
-        arrive rather than defaulting to clear sky: a truncated
-        response must not silently become an optimistic forecast for
-        the rest of the day.
+        A missing block returns NaN and takes the ANCHOR, matching
+        their _parse_llm_response, which falls back per block rather
+        than per response. The previous behaviour interpolated missing
+        blocks from the ones that arrived, which quietly invented model
+        opinions the model never expressed.
         """
 
         values = {}
+        weights = {}
+
+        default_weight = self.CONFIDENCE_WEIGHT["medium"]
 
         for entry in payload.get("blocks", []):
+
+            confidence = None
 
             if isinstance(entry, dict):
                 number, value = entry.get("block"), entry.get("value")
                 if value is None:
                     value = entry.get("kt", entry.get("power_mw"))
+                confidence = entry.get("confidence")
             elif isinstance(entry, (list, tuple)) and len(entry) >= 2:
                 number, value = entry[0], entry[1]
+                if len(entry) >= 3:
+                    confidence = entry[2]
             else:
                 continue
 
             try:
-                values[int(number)] = float(value)
+                block = int(number)
+                values[block] = float(value)
             except (TypeError, ValueError):
                 continue
 
+            weights[block] = self.CONFIDENCE_WEIGHT.get(
+                str(confidence).strip().lower(), default_weight
+            )
+
         blocks = ahead["block"].to_numpy()
+
+        if not any(b in values for b in blocks):
+            raise ValueError("model returned no usable blocks")
 
         missing = [b for b in blocks if b not in values]
 
-        if len(missing) == len(blocks):
-            raise ValueError("model returned no usable blocks")
-
         if missing:
             self.logger.warning(
-                f"Model omitted {len(missing)} of {len(blocks)} blocks "
+                f"Model omitted {len(missing)} of {len(blocks)} block(s) "
                 f"({missing[:6]}{'...' if len(missing) > 6 else ''}) "
-                "- filled by interpolating the blocks it did return"
+                "- those will publish at the anchor"
             )
 
-            known = np.array(sorted(values))
-            series = np.array([values[b] for b in known], dtype=float)
+        raw = np.array(
+            [values.get(b, np.nan) for b in blocks], dtype=float
+        )
+        weight = np.array(
+            [weights.get(b, 0.0) for b in blocks], dtype=float
+        )
 
-            for block in missing:
-                values[block] = float(np.interp(block, known, series))
-
-        return np.array([values[b] for b in blocks], dtype=float)
+        return raw, weight
 
     # --------------------------------------------------
 
@@ -711,11 +766,15 @@ the {count} blocks from {first_block} to {last_block}, in order, with no gaps.\
 
         payload = self.parser.parse(response)
 
-        raw = self.parse_blocks(payload, ahead)
+        raw, confidence_weight = self.parse_blocks(payload, ahead)
 
         kt, power = self.to_power(raw, ahead)
 
         anchor = self.anchor_mw(features, ahead)
+
+        # A block the model did not answer takes the anchor outright.
+        missing = ~np.isfinite(power)
+        power = np.where(missing, anchor, power)
 
         # BLEND WITH THE ANCHOR, DO NOT MERELY BOUND BY IT.
         #
@@ -729,11 +788,17 @@ the {count} blocks from {first_block} to {last_block}, in order, with no gaps.\
         # from +80% (with weather) to -35% (without) while damped
         # persistence sat within 1% of truth all day. A signal that
         # unstable should move the published number, not be it.
-        if self.blend_weight < 1.0:
-            power = (
-                self.blend_weight * power
-                + (1.0 - self.blend_weight) * anchor
-            )
+        # PER-BLOCK weight, not one number for the whole run. The model
+        # states its own confidence per block (their idea), and that
+        # becomes how much of its number survives: high 0.8, medium 0.5,
+        # low 0.2, omitted 0. fusion.blend_weight scales the whole thing,
+        # so 0 still means "publish the anchor" and 1.0 means "let the
+        # stated confidence decide alone".
+        weight = np.clip(confidence_weight * self.blend_weight * 2.0, 0.0, 1.0)
+
+        weight = np.where(missing, 0.0, weight)
+
+        power = weight * power + (1.0 - weight) * anchor
 
         schedule = pd.DataFrame({
             "block": ahead["block"].to_numpy(),
@@ -753,6 +818,7 @@ the {count} blocks from {first_block} to {last_block}, in order, with no gaps.\
                 0.0, self.capacity_mw,
             ) if self.output_mode == "kt" else np.clip(raw, 0, self.capacity_mw),
             "llm_kt": kt,
+            "llm_weight": weight,
             "forecast_mw": power,
         })
 
