@@ -429,6 +429,22 @@ fusion:
   # 0.5 is a starting point, not a tuned value. Sweep it once the
   # seven-run backtest is complete.
   blend_weight: 0.5
+
+  # Block bias correction, learned from THIS pipeline's own finished
+  # days (modules/forecasting/llm_block_bias.py). Mentor guidance
+  # 2026-08-06.
+  #
+  # Strength 0.25, not production's 0.5 - measured, not inherited.
+  # tests/whatif_correction.py over 12 walk-forward days:
+  #
+  #   strength   0.00    0.10    0.20   0.25    0.35    0.50    1.00
+  #   penalty  27,663  27,457  27,376 27,371  27,426  27,709  30,363
+  #
+  # Clean minimum at 0.25, saving Rs 291, and monotonic harm past it.
+  # Production can afford 0.5 because its error has a steadier
+  # time-of-day shape; this model's is more erratic.
+  block_bias: true
+  block_bias_strength: 0.25
   # Lower than the vision prompt's 0.2: a schedule should not change
   # because the sampler rolled differently, and the freeze horizon makes
   # run-to-run jitter expensive.

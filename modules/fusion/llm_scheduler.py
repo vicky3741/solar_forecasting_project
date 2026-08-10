@@ -88,8 +88,10 @@ class LLMScheduler:
         self.validator = ScheduleValidator()
 
         from modules.fusion.case_retrieval import CaseRetriever
+        from modules.forecasting.llm_block_bias import LLMBlockBias
 
         self.cases = CaseRetriever()
+        self.block_bias = LLMBlockBias()
 
         plant = settings["plant"]
 
@@ -826,6 +828,19 @@ RESPOND WITH JSON ONLY, no prose outside it, in exactly this form:
         # values already sent to the grid operator, and those were
         # validated when they were first published - re-validating them
         # against today's anchor would rewrite a committed block.
+        # Block bias BEFORE the validator, so a learned shift is still
+        # subject to the same range, deviation and smoothness checks as
+        # anything else. A correction that could push a block outside
+        # those bounds would be a second unchecked author.
+        self.block_bias.load(as_of=run_time)
+
+        if self.block_bias.available:
+            schedule = self.block_bias.apply(schedule)
+            self.logger.info(
+                "Block bias applied "
+                f"(learned from {self.block_bias.days_used} day(s))"
+            )
+
         schedule, validator_notes = self.validator.validate(
             schedule, max_deviation_fraction=self.deviation_limit(run_time)
         )
