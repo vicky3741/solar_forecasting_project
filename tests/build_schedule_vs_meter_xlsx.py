@@ -38,6 +38,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 from openpyxl import Workbook
+from openpyxl.chart import BarChart, LineChart, Reference
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
@@ -294,9 +295,114 @@ def build(day, folder, out_path):
 
     sheet.freeze_panes = "A5"
 
+    add_charts(sheet, len(frame))
+
     book.save(out_path)
 
     return frame, scored, penalised
+
+
+def add_charts(sheet, block_count):
+    """
+    Two charts, on their own sheet so they never sit on top of the data.
+
+    1. Scheduled vs Actual, MW per block - the shape of the day, and
+       where the schedule tracked or missed it.
+    2. Deviation per block as % of capacity, with the +/-10% free-band
+       edges drawn as reference lines. Anything between those two lines
+       cost nothing; only bars crossing them carry a penalty. That is
+       the whole DSM picture in one image, and it is the chart that
+       makes "we were close on average" and "we stayed inside the band"
+       visibly different claims.
+    """
+
+    first = 5
+    last = first + block_count - 1
+
+    # Constant +/-10% series, written beside the data so the chart can
+    # reference them. Kept narrow and out of the printed columns.
+    sheet.cell(4, 10, "+10% band")
+    sheet.cell(4, 11, "-10% band")
+
+    for row in range(first, last + 1):
+        sheet.cell(row, 10, 10)
+        sheet.cell(row, 11, -10)
+
+    for column in (10, 11):
+        sheet.column_dimensions[get_column_letter(column)].hidden = True
+
+    charts = sheet.parent.create_sheet("Charts")
+
+    blocks = Reference(sheet, min_col=2, min_row=first, max_row=last)
+
+    # ---- 1. scheduled vs actual ----
+    line = LineChart()
+    line.title = "Scheduled vs Actual generation (MW)"
+    line.y_axis.title = "MW"
+    line.x_axis.title = "Block"
+    line.height = 10
+    line.width = 32
+    line.style = 2
+
+    line.add_data(
+        Reference(sheet, min_col=3, min_row=4, max_row=last), titles_from_data=True
+    )
+    line.add_data(
+        Reference(sheet, min_col=4, min_row=4, max_row=last), titles_from_data=True
+    )
+    line.set_categories(blocks)
+
+    line.series[0].graphicalProperties.line.width = 22000
+    line.series[0].graphicalProperties.line.solidFill = "1F4E9C"
+    line.series[1].graphicalProperties.line.width = 22000
+    line.series[1].graphicalProperties.line.solidFill = "1B4332"
+
+    for series in line.series:
+        series.smooth = False
+
+    charts.add_chart(line, "B2")
+
+    # ---- 2. deviation vs the free band ----
+    bar = BarChart()
+    bar.type = "col"
+    bar.title = "Deviation per block (% of capacity) — inside ±10% costs nothing"
+    bar.y_axis.title = "% of capacity"
+    bar.x_axis.title = "Block"
+    bar.height = 10
+    bar.width = 32
+    bar.gapWidth = 30
+
+    bar.add_data(
+        Reference(sheet, min_col=6, min_row=4, max_row=last), titles_from_data=True
+    )
+    bar.set_categories(blocks)
+    bar.series[0].graphicalProperties.solidFill = "C00000"
+
+    band = LineChart()
+
+    band.add_data(
+        Reference(sheet, min_col=10, min_row=4, max_row=last), titles_from_data=True
+    )
+    band.add_data(
+        Reference(sheet, min_col=11, min_row=4, max_row=last), titles_from_data=True
+    )
+
+    for series in band.series:
+        series.graphicalProperties.line.solidFill = "1B4332"
+        series.graphicalProperties.line.dashStyle = "dash"
+        series.graphicalProperties.line.width = 16000
+        series.smooth = False
+
+    bar += band
+
+    charts.add_chart(bar, "B24")
+
+    charts.cell(1, 2, "Read the second chart first: bars inside the dashed "
+                      "lines are free, bars crossing them are what you pay for.")
+    charts.cell(1, 2).font = Font(name="Arial", size=10, italic=True,
+                                  color="444444")
+
+    charts.column_dimensions["A"].width = 3
 
 
 def main():
