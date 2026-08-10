@@ -200,6 +200,93 @@ class InputSkill:
 
     # --------------------------------------------------
 
+    def own_record(self, before_date):
+        """
+        How wrong THIS PIPELINE has been over recent finished days -
+        MAE, RMSE and bias on its own published schedules.
+
+        Team 1's step 7. Distinct from the per-input table below, which
+        says which SOURCE has been accurate; this says how the finished
+        forecast has behaved. A model can be told the meter is the best
+        input and still not know that its own output has run high three
+        days running.
+
+        Bias is the useful one and is reported with its sign preserved:
+        MAE says how far off, bias says which way. A model that has been
+        consistently over should hear "over", not "wrong by 0.6 MW".
+        """
+
+        blocks = self.gather(before_date)
+
+        if blocks.empty or "forecast_mw" not in blocks.columns:
+            return None
+
+        days = sorted(blocks["day"].unique())[-self.lookback_days:]
+        blocks = blocks[blocks["day"].isin(days)].dropna(
+            subset=["forecast_mw", "actual_mw"]
+        )
+
+        if blocks.empty:
+            return None
+
+        error = blocks["actual_mw"] - blocks["forecast_mw"]
+
+        per_day = blocks.assign(err=error).groupby("day")["err"].mean()
+
+        # "Same direction on N of M days" is what tells a forecaster
+        # whether a bias is real or is one bad afternoon averaged in.
+        signs = np.sign(per_day.to_numpy())
+        over = int((signs < 0).sum())
+
+        return {
+            "days": len(per_day),
+            "blocks": int(len(blocks)),
+            "mae_pct": float(error.abs().mean() / CAPACITY_MW * 100),
+            "rmse_pct": float(
+                np.sqrt((error ** 2).mean()) / CAPACITY_MW * 100
+            ),
+            "bias_pct": float(error.mean() / CAPACITY_MW * 100),
+            "days_over": over,
+            "days_under": len(per_day) - over,
+        }
+
+    # --------------------------------------------------
+
+    def own_record_section(self, run_time):
+        """The pipeline's own recent record, as prompt text."""
+
+        record = self.own_record(pd.Timestamp(run_time).date())
+
+        if record is None:
+            return None
+
+        direction = "OVER-forecasting" if record["bias_pct"] < 0 else "UNDER-forecasting"
+
+        consistent = max(record["days_over"], record["days_under"])
+
+        line = (
+            f"This pipeline's own recent record, over {record['days']} "
+            f"finished day(s) and {record['blocks']} scored block(s):\n"
+            f"  average miss (MAE): {record['mae_pct']:.1f}% of capacity\n"
+            f"  RMSE:               {record['rmse_pct']:.1f}%\n"
+            f"  bias:               {abs(record['bias_pct']):.1f}% "
+            f"{direction}\n"
+            f"  direction:          {direction.split('-')[0].lower()} on "
+            f"{consistent} of {record['days']} day(s)"
+        )
+
+        if consistent == record["days"] and record["days"] >= 3:
+            line += (
+                f"\n\nThat is EVERY recent day in the same direction. A "
+                f"one-way miss that persistent is a calibration problem, not "
+                f"bad luck - correct for it deliberately rather than "
+                f"repeating it."
+            )
+
+        return line
+
+    # --------------------------------------------------
+
     def prompt_section(self, run_time):
         """
         The track record, as prompt text. Returns None when there is not

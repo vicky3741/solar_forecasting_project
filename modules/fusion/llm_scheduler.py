@@ -591,13 +591,24 @@ cloud DIRECTION is not measurable from it and is not reported."""
         try:
             from modules.evaluation.input_skill import InputSkill
 
-            section = InputSkill().prompt_section(run_time)
+            skill = InputSkill()
+
+            # Two different questions, both worth answering: how the
+            # finished forecast has behaved, and which source has been
+            # closest. The first tells the model about itself, the
+            # second about what to lean on.
+            parts = [
+                skill.own_record_section(run_time),
+                skill.prompt_section(run_time),
+            ]
 
         except Exception as error:
             self.logger.warning(f"Input track record unavailable ({error})")
             return None
 
-        return section
+        parts = [p for p in parts if p]
+
+        return "\n\n".join(parts) if parts else None
 
     # --------------------------------------------------
 
