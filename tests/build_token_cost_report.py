@@ -43,16 +43,38 @@ from reportlab.platypus import (
 from config.config import settings
 
 
-# Published paid-tier rates, per 1M tokens, from
-# ai.google.dev/gemini-api/docs/pricing (checked 2026-08-10).
+# Published paid-tier rates, per 1M tokens, read from
+# ai.google.dev/gemini-api/docs/pricing on 2026-08-10.
+#
+# Only models whose rate was actually READ are listed. A model this
+# pipeline can fall back to but whose price was not on that page is
+# absent here on purpose, and the report says so rather than filling
+# the gap with a plausible number.
 PRICING = {
     "gemini-3.5-flash": {"input": 1.50, "output": 9.00},
-    "gemini-3.6-flash": {"input": 1.50, "output": 7.50},
-    "gemini-flash-latest": {"input": 1.50, "output": 7.50},
     "gemini-3.5-flash-lite": {"input": 0.30, "output": 2.50},
+    # gemini-flash-latest currently resolves to gemini-3.6-flash.
+    "gemini-flash-latest": {"input": 1.50, "output": 7.50},
 }
 
-USD_TO_INR = 84.0        # same reference rate the comparison report used
+# Which fallbacks this pipeline would actually use, in order, from
+# config. Not a general survey of Google's catalogue - a model we
+# cannot call is not a cost option for us.
+def configured_models():
+
+    vision = settings.get("vision", {})
+
+    chain = [vision.get("model")] + list(vision.get("fallback_models", []))
+
+    return [name for name in chain if name]
+
+
+# Live ECB reference rate, fetched 2026-08-10 from
+# api.frankfurter.dev/v1/latest?from=USD&to=INR, quoted for 2026-08-07.
+# Measured rather than assumed: a stale round number would silently
+# misstate every rupee figure in this report by several percent.
+USD_TO_INR = 95.21
+USD_TO_INR_SOURCE = "ECB reference rate, 2026-08-07 (frankfurter.dev)"
 
 DARK = colors.HexColor("#1B4332")
 ACCENT = colors.HexColor("#1F4E9C")
@@ -272,8 +294,10 @@ def build(measurements, out_path):
         f"Published paid-tier pricing for <b>{model}</b>: "
         f"<b>${rates['input']:.2f} / 1M input tokens</b>, "
         f"<b>${rates['output']:.2f} / 1M output tokens</b> "
-        f"(ai.google.dev/gemini-api/docs/pricing). "
-        f"USD→INR at Rs{USD_TO_INR:.0f}/$ for reference.",
+        f"(ai.google.dev/gemini-api/docs/pricing, read 2026-08-10). "
+        f"Rupee figures use <b>Rs {USD_TO_INR:.2f} / $</b> &mdash; "
+        f"{USD_TO_INR_SOURCE} &mdash; rather than a rounded convention, "
+        f"since a stale rate would misstate every rupee figure here.",
         body,
     ))
 
@@ -297,35 +321,55 @@ def build(measurements, out_path):
     # ---------- 5. model choice ----------
     story.append(Paragraph("5. Effect of Model Choice", h2))
 
+    chain = configured_models()
+
     story.append(Paragraph(
-        "The same measured token volume, priced against the other Flash "
-        "models this pipeline can fall back to. Output rate is what matters "
-        "here, because thinking tokens make output "
+        "The same measured token volume, priced against the models "
+        "<b>this pipeline is configured to call</b> &mdash; its primary and "
+        "its fallback chain, in order. The output rate is what decides the "
+        "bill, because thinking tokens make output "
         f"{daily_output / daily_input:.1f}× the input volume.",
         body,
     ))
 
-    rows = [["Model", "$/1M in", "$/1M out", "Cost/year (USD)",
+    rows = [["Model (call order)", "$/1M in", "$/1M out", "Cost/year (USD)",
              "Cost/year (INR)"]]
 
-    for name in ("gemini-3.5-flash", "gemini-3.6-flash",
-                 "gemini-3.5-flash-lite"):
+    unpriced = []
 
-        rate = PRICING[name]
+    for position, name in enumerate(chain, start=1):
+
+        rate = PRICING.get(name)
+
+        label = f"{position}. {name}" + (" — in use" if name == model else "")
+
+        if rate is None:
+            unpriced.append(name)
+            rows.append([label, "not published", "not published", "—", "—"])
+            continue
 
         usd = (
             daily_input * 365 / 1e6 * rate["input"]
             + daily_output * 365 / 1e6 * rate["output"]
         )
 
-        label = name + (" (in use)" if name == model else "")
-
         rows.append([
             label, f"${rate['input']:.2f}", f"${rate['output']:.2f}",
             money(usd), rupees(usd),
         ])
 
-    story.append(table(rows, [50 * mm, 22 * mm, 24 * mm, 32 * mm, 32 * mm]))
+    story.append(table(rows, [58 * mm, 22 * mm, 24 * mm, 30 * mm, 32 * mm]))
+
+    if unpriced:
+        story.append(Paragraph(
+            f"<b>{len(unpriced)} fallback model(s)</b> "
+            f"({', '.join(unpriced)}) carry no published rate on Google's "
+            "pricing page and are left blank rather than filled with a "
+            "plausible figure. They are reached only after earlier models "
+            "exhaust their free-tier request cap, so on the paid tier they "
+            "would not normally be called at all.",
+            note,
+        ))
 
     # ---------- 6. scaling ----------
     story.append(Paragraph("6. Scaling to Multiple Sites", h2))
@@ -391,9 +435,11 @@ def build(measurements, out_path):
         f"{measurements['prompts_measured']} measured production prompts "
         f"({measurements['days_covered']} days) and {calls} live "
         f"generateContent calls against <b>{model}</b>. "
-        "Token counts by Gemini countTokens and usage_metadata; prices per "
-        "Google's published Gemini API pricing page at time of writing "
-        "— confirm current rates before financial commitments. "
+        "Token counts by Gemini countTokens and usage_metadata; prices read "
+        "from Google's published Gemini API pricing page on 2026-08-10; "
+        f"exchange rate from the {USD_TO_INR_SOURCE}. Confirm current rates "
+        "before financial commitments. Every figure here was measured for "
+        "this pipeline - none is carried over from any other report. "
         "Source: tests/measure_token_cost.py, tests/build_token_cost_report.py.",
         note,
     ))
