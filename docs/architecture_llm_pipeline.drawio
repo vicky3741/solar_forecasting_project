@@ -1,0 +1,287 @@
+<mxfile host="app.diagrams.net" version="24.0.0">
+  <diagram name="New LLM Pipeline - Detailed" id="llmPipelineDetailed">
+    <mxGraphModel dx="1600" dy="1000" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="2100" pageHeight="3100" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <mxCell id="title" value="SIRMOUR — LLM Scheduling Pipeline (new approach)" style="text;html=1;fontSize=26;fontStyle=1;fontColor=#1B4332;align=left;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="40" y="20" width="1100" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="subtitle" value="One Gemini call per run. Everything else is deterministic Python / OpenCV / pvlib. 7 runs a day: 06:45, 08:15, 09:45, 11:15, 12:45, 14:15, 15:45. Each run forecasts every remaining 15-min block to 19:00.&#10;Plant selected by SOLAR_PLANT env var — nothing below names a plant. Entry point: modules/orchestrator/llm_pipeline.py" style="text;html=1;fontSize=12;fontColor=#444444;align=left;verticalAlign=top;spacingTop=2;" vertex="1" parent="1">
+          <mxGeometry x="40" y="62" width="1400" height="46" as="geometry" />
+        </mxCell>
+
+        <!-- ================= EXTERNAL SERVICES ================= -->
+        <mxCell id="extBox" value="EXTERNAL SERVICES" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFF4E6;strokeColor=#E8A33D;dashed=1;verticalAlign=top;align=left;spacingLeft=10;spacingTop=6;fontStyle=1;fontSize=12;fontColor=#8A5A00;" vertex="1" parent="1">
+          <mxGeometry x="40" y="130" width="300" height="600" as="geometry" />
+        </mxCell>
+        <mxCell id="extWindyWww" value="windy.com (full app)&#10;premium session&#10;HOURLY ECMWF, 143 steps&#10;WebGL required (SwiftShader)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFE8CC;strokeColor=#E8A33D;fontSize=11;align=left;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="60" y="165" width="260" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="extWindyEmbed" value="embed.windy.com&#10;no login — ALWAYS free tier&#10;3-hourly, ~3 daylight points/day" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFE8CC;strokeColor=#E8A33D;fontSize=11;align=left;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="60" y="248" width="260" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="extGemini" value="Google Gemini API&#10;gemini-3.6-flash (fusion.model)&#10;fallback chain of 5 models&#10;free tier: 20 requests/day PER MODEL" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFE8CC;strokeColor=#E8A33D;fontSize=11;align=left;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="60" y="321" width="260" height="72" as="geometry" />
+        </mxCell>
+        <mxCell id="extMeteo" value="Open-Meteo API&#10;ECMWF ifs025, hourly GHI&#10;has an ARCHIVE — backfillable" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFE8CC;strokeColor=#E8A33D;fontSize=11;align=left;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="60" y="406" width="260" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="extS3" value="AWS S3 — sirmour-team2-storage&#10;videos/  inputs/  outputs/&#10;auto_pull + auto_push" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFE8CC;strokeColor=#E8A33D;fontSize=11;align=left;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="60" y="479" width="260" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="extInbox" value="Vedanjay meter inbox (OneDrive)&#10;SIRMOUR_DATA/.../meter_data/&#10;YYYY_MM_DD_SOLAR_INV.csv" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFE8CC;strokeColor=#E8A33D;fontSize=11;align=left;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="60" y="552" width="260" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="extNote" value="Windy's solarpower IS ECMWF —&#10;the same model Open-Meteo serves.&#10;Windy has no archive, so it can only&#10;ever be validated forward." style="text;html=1;fontSize=10;fontColor=#8A5A00;align=left;verticalAlign=top;" vertex="1" parent="1">
+          <mxGeometry x="60" y="622" width="260" height="70" as="geometry" />
+        </mxCell>
+
+        <!-- ================= STAGE 0 ================= -->
+        <mxCell id="s0Box" value="STAGE 0 — DAILY HOUSEKEEPING (no LLM)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#EEF6FF;strokeColor=#1F4E9C;verticalAlign=top;align=left;spacingLeft=10;spacingTop=6;fontStyle=1;fontSize=12;fontColor=#1F4E9C;" vertex="1" parent="1">
+          <mxGeometry x="400" y="130" width="700" height="150" as="geometry" />
+        </mxCell>
+        <mxCell id="s0Inbox" value="meter_inbox.py&#10;copy new exports → data/historical&#10;COPY-ONLY, never moves or deletes&#10;strips vendor &quot;(1)&quot; reissue suffix" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DCEAFB;strokeColor=#1F4E9C;fontSize=11;align=left;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="420" y="165" width="310" height="76" as="geometry" />
+        </mxCell>
+        <mxCell id="s0Pre" value="preprocess.py&#10;per-day resample to 15-min grid&#10;drops all-empty + duplicate columns&#10;(2026-08-10 export added blank &quot;Timestamp&quot;)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DCEAFB;strokeColor=#1F4E9C;fontSize=11;align=left;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="760" y="165" width="320" height="76" as="geometry" />
+        </mxCell>
+
+        <!-- ================= STAGE 1 ================= -->
+        <mxCell id="s1Box" value="STAGE 1 — CAPTURE (no LLM)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#EEF6FF;strokeColor=#1F4E9C;verticalAlign=top;align=left;spacingLeft=10;spacingTop=6;fontStyle=1;fontSize=12;fontColor=#1F4E9C;" vertex="1" parent="1">
+          <mxGeometry x="400" y="300" width="700" height="290" as="geometry" />
+        </mxCell>
+        <mxCell id="s1Scraper" value="windy_scraper.py — reads NUMBERS, not pixels&#10;source: auto → www if session exists, else embed&#10;W.store.set('timestamp') steps the forecast&#10;value read from .picker-change-metric&#10;settle: wait redrawFinished, then poll until stable&#10;STALE GUARD: identical readings across all steps → discard&#10;layers: solarpower, clouds, l/m/h clouds, rain, wind" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DCEAFB;strokeColor=#1F4E9C;fontSize=11;align=left;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="420" y="335" width="330" height="126" as="geometry" />
+        </mxCell>
+        <mxCell id="s1K1" value="windy_capture_k1.py (Team 1 method)&#10;www.windy.com, zoom 11, 1600×1000&#10;5 layer screenshots&#10;right-click → &quot;Show weather picker&quot;&#10;(right-click alone leaves the menu over the plant)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DCEAFB;strokeColor=#1F4E9C;fontSize=11;align=left;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="770" y="335" width="310" height="126" as="geometry" />
+        </mxCell>
+        <mxCell id="s1Clip" value="windy_capture.py — satellite clip (20 s .webm)&#10;low-memory Chromium args; H.264 compress; S3 upload first" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DCEAFB;strokeColor=#1F4E9C;fontSize=11;align=left;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="420" y="475" width="330" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="s1Login" value="windy_login.py — one-time interactive login&#10;saves windy_session.json (GITIGNORED)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DCEAFB;strokeColor=#1F4E9C;fontSize=11;align=left;spacingLeft=8;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="770" y="475" width="310" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="s1Note" value="Premium only reaches www.windy.com — the embed does no premium check at all, and the session holds no token to carry across." style="text;html=1;fontSize=10;fontColor=#1F4E9C;align=left;" vertex="1" parent="1">
+          <mxGeometry x="420" y="545" width="660" height="30" as="geometry" />
+        </mxCell>
+
+        <!-- ================= STAGE 2 ================= -->
+        <mxCell id="s2Box" value="STAGE 2 — FEATURE EXTRACTION, OpenCV, runs LOCALLY (no LLM)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#EEF6FF;strokeColor=#1F4E9C;verticalAlign=top;align=left;spacingLeft=10;spacingTop=6;fontStyle=1;fontSize=12;fontColor=#1F4E9C;" vertex="1" parent="1">
+          <mxGeometry x="400" y="610" width="700" height="230" as="geometry" />
+        </mxCell>
+        <mxCell id="s2Sat" value="satellite_features.py&#10;ROI sized in KM (not a fixed fraction)&#10;thin (110) / thick (175) cloud split&#10;Shannon entropy = patchiness&#10;Farneback flow → divergence, vorticity,&#10;kinetic energy (survive the crossfade)&#10;quadrant cloud N/S/E/W&#10;NO mean hue — hue is circular" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DCEAFB;strokeColor=#1F4E9C;fontSize=11;align=left;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="420" y="645" width="310" height="140" as="geometry" />
+        </mxCell>
+        <mxCell id="s2Motion" value="windy_motion.py (Team 1, verbatim port)&#10;every 3rd frame, plant ROI box&#10;mean flow over whole ROI&#10;consistency = |mean| / mean|v|, trust ≥ 0.35&#10;coverage start/end, ±3 pt dead band&#10;DEVIATION: crop+grey as read (20 s clips&#10;would need ~460 MB buffered full-colour)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DCEAFB;strokeColor=#1F4E9C;fontSize=11;align=left;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="750" y="645" width="330" height="140" as="geometry" />
+        </mxCell>
+        <mxCell id="s2Layer" value="windy_layer_features.py (Team 1, verbatim) — per layer: avg_brightness, brightness_std, avg_saturation, avg_hue_deg (CIRCULAR mean), bright_pixel_pct" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DCEAFB;strokeColor=#1F4E9C;fontSize=11;align=left;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="420" y="795" width="660" height="34" as="geometry" />
+        </mxCell>
+
+        <!-- ================= STAGE 3 ================= -->
+        <mxCell id="s3Box" value="STAGE 3 — THE ONE FEATURE TABLE (no LLM)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#1B4332;verticalAlign=top;align=left;spacingLeft=10;spacingTop=6;fontStyle=1;fontSize=12;fontColor=#1B4332;" vertex="1" parent="1">
+          <mxGeometry x="400" y="860" width="700" height="330" as="geometry" />
+        </mxCell>
+        <mxCell id="s3Main" value="windy_features.py — 96 rows, one per 15-minute block&#10;&#10;• geometry: solar_elevation_deg, solar_azimuth_deg, day_of_year, month, hour, is_daylight&#10;• physics (pvlib ineichen + POA transposition, tilt 24.56° az 180°): clearsky_ghi_w_m2,&#10;   clearsky_poa_w_m2, clearsky_power_mw&#10;• Windy: windy_solarpower_w_m2, windy_kt, windy_clouds/lclouds/mclouds/hclouds_pct,&#10;   windy_rain_mm, windy_wind_kt, windy_wind_from_deg&#10;• weather: weather_kt, weather_bias_factor&#10;• satellite: sat_thick/thin/clear_cloud_pct, sat_entropy, sat_flow_*, sat_quadrants, sat_age_minutes&#10;• meter (past blocks only): actual_power_mw, actual_ghi_w_m2, actual_kt, is_past&#10;• HONESTY COLUMNS: windy_is_measured (1 = real reading), windy_gap_minutes" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D4EDDA;strokeColor=#1B4332;fontSize=11;align=left;spacingLeft=8;verticalAlign=top;spacingTop=6;" vertex="1" parent="1">
+          <mxGeometry x="420" y="895" width="660" height="180" as="geometry" />
+        </mxCell>
+        <mxCell id="s3Interp" value="INTERPOLATION RULE — Windy is 3-hourly, blocks are 15-minutely.&#10;Interpolate kt (= solarpower / clearsky_ghi), NOT raw W/m², then multiply back by the block's clear-sky GHI.&#10;kt carries no daily shape; the shape comes from pvlib, which is exact. Verified to land on 173 / 765 / 492 W/m² at the real steps." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF9C4;strokeColor=#B8860B;fontSize=11;align=left;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="420" y="1085" width="660" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="s3Weather" value="open_meteo.py → weather_kt (bias-corrected, walk-forward). fusion.use_weather" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D4EDDA;strokeColor=#1B4332;fontSize=11;align=left;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="420" y="1150" width="660" height="30" as="geometry" />
+        </mxCell>
+
+        <!-- ================= STAGE 4 ================= -->
+        <mxCell id="s4Box" value="STAGE 4 — THE ONLY LLM STEP" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FDEBEC;strokeColor=#C00000;verticalAlign=top;align=left;spacingLeft=10;spacingTop=6;fontStyle=1;fontSize=13;fontColor=#C00000;" vertex="1" parent="1">
+          <mxGeometry x="400" y="1210" width="700" height="500" as="geometry" />
+        </mxCell>
+        <mxCell id="s4Prompt" value="llm_scheduler.py — builds ONE prompt, makes ONE call&#10;&#10;1  today's measured generation so far (last 12 blocks)&#10;2  WHAT KIND OF DAY — intraday_shape.py&#10;3  current sky observation (satellite)&#10;4  precedent — case_retrieval.py&#10;5  which inputs have been right — input_skill.py&#10;6  the block table (empty columns omitted)&#10;7  column guide + task + JSON spec" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FAD4D6;strokeColor=#C00000;fontSize=11;align=left;spacingLeft=8;verticalAlign=top;spacingTop=6;" vertex="1" parent="1">
+          <mxGeometry x="420" y="1248" width="330" height="160" as="geometry" />
+        </mxCell>
+        <mxCell id="s4Intraday" value="intraday_shape.py&#10;reversals (direction changes), not variance&#10;judged vs THIS plant's last 10 days&#10;&gt;75th pct = CHOPPIER THAN USUAL&#10;&lt;25th pct = CALMER&#10;&lt;4 reference days → no label at all" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FAD4D6;strokeColor=#C00000;fontSize=11;align=left;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="770" y="1248" width="310" height="105" as="geometry" />
+        </mxCell>
+        <mxCell id="s4Cases" value="case_retrieval.py — precedent as EVIDENCE&#10;weighted Euclidean on z-scored features&#10;top-12, summarised at 30/90/180 min&#10;excludes the WHOLE query day (stricter than Team 1)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FAD4D6;strokeColor=#C00000;fontSize=11;align=left;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="770" y="1363" width="310" height="82" as="geometry" />
+        </mxCell>
+        <mxCell id="s4Skill" value="input_skill.py — two questions&#10;(a) how wrong has THIS PIPELINE been: MAE / RMSE / bias, sign kept&#10;(b) which INPUT has been closest: per-input error + days-best" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FAD4D6;strokeColor=#C00000;fontSize=11;align=left;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="420" y="1420" width="660" height="56" as="geometry" />
+        </mxCell>
+        <mxCell id="s4Call" value="gemini_client.py — generate_text(prompt, images, model)&#10;text + 2 layer screenshots (2,184 tokens, 1,092 each)&#10;per-model daily-quota detection → falls through 5 models&#10;exponential backoff on 503 / per-minute 429" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FAD4D6;strokeColor=#C00000;fontSize=11;align=left;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="420" y="1490" width="330" height="86" as="geometry" />
+        </mxCell>
+        <mxCell id="s4Ask" value="ASKED TO ADJUST, NOT TO AUTHOR&#10;&quot;Start from anchor_kt and move it only where&#10;the evidence justifies it.&quot;&#10;Returns per block: [block, kt, confidence]&#10;+ regime + one reasoning for the run" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF9C4;strokeColor=#B8860B;fontSize=11;align=left;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="770" y="1490" width="310" height="86" as="geometry" />
+        </mxCell>
+        <mxCell id="s4Blend" value="PER-BLOCK CONFIDENCE → BLEND WEIGHT&#10;high 0.8 · medium 0.5 · low 0.2 · omitted 0 (takes the anchor)&#10;published = w × model + (1 − w) × anchor      [fusion.blend_weight scales w]&#10;ANCHOR = damped persistence from the meter — NEVER a forecast&#10;kt_now·e^(−h/120) + kt_day·(1 − e^(−h/120));  kt × pvlib clear-sky → MW" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF9C4;strokeColor=#B8860B;fontSize=11;align=left;spacingLeft=8;verticalAlign=top;spacingTop=6;" vertex="1" parent="1">
+          <mxGeometry x="420" y="1590" width="660" height="105" as="geometry" />
+        </mxCell>
+
+        <!-- ================= STAGE 5-7 ================= -->
+        <mxCell id="s5Box" value="STAGE 5-7 — CORRECTION, GUARD RAILS, FREEZE (no LLM)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#EEF6FF;strokeColor=#1F4E9C;verticalAlign=top;align=left;spacingLeft=10;spacingTop=6;fontStyle=1;fontSize=12;fontColor=#1F4E9C;" vertex="1" parent="1">
+          <mxGeometry x="400" y="1730" width="700" height="300" as="geometry" />
+        </mxCell>
+        <mxCell id="s5Level" value="llm_block_bias.py — LEVEL CALIBRATION&#10;factor = recent total actual / total scheduled, bounded [0.5, 1.5]&#10;applied at strength 0.55&#10;MEASURED: level alone Rs 26,256 · shape alone Rs 27,371&#10;level+shape Rs 26,563–26,924 · baseline Rs 27,663&#10;→ they do NOT stack: block SHAPE is OFF" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DCEAFB;strokeColor=#1F4E9C;fontSize=11;align=left;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="420" y="1768" width="660" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="s6Val" value="validator.py — 3 deterministic checks&#10;1  clip to [0, capacity]&#10;2  within 25% of the anchor (was 40%)&#10;3  block-to-block step ≤ 35% of capacity&#10;widens to 60% / 80% after 2 / 3 consistently biased days&#10;every adjustment recorded: was_adjusted + adjustment_note" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DCEAFB;strokeColor=#1F4E9C;fontSize=11;align=left;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="420" y="1878" width="330" height="105" as="geometry" />
+        </mxCell>
+        <mxCell id="s7Freeze" value="effective_time.py — FREEZE HORIZON&#10;Sirmour 6 blocks (90 min) · Telangana 3 (45 min)&#10;run 11:15 → engine block 46 → freeze 46–51&#10;→ new schedule effective from block 52 (12:45)&#10;runs AFTER the validator: frozen blocks were&#10;already validated when first published" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DCEAFB;strokeColor=#1F4E9C;fontSize=11;align=left;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="770" y="1878" width="310" height="105" as="geometry" />
+        </mxCell>
+
+        <!-- ================= STAGE 8 ================= -->
+        <mxCell id="s8Box" value="STAGE 8 — PUBLISH" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#1B4332;verticalAlign=top;align=left;spacingLeft=10;spacingTop=6;fontStyle=1;fontSize=12;fontColor=#1B4332;" vertex="1" parent="1">
+          <mxGeometry x="400" y="2060" width="700" height="150" as="geometry" />
+        </mxCell>
+        <mxCell id="s8Files" value="outputs/llm_schedules/&lt;PLANT&gt;_&lt;date&gt;_&lt;time&gt;_schedule.csv&#10;block · timestamp · clearsky_power_mw · anchor_mw · llm_raw_mw&#10;llm_kt · llm_weight · forecast_mw · was_adjusted · adjustment_note&#10;+ _meta.json (regime, reasoning, images attached, model used)&#10;+ _prompt.txt (the exact prompt sent)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D4EDDA;strokeColor=#1B4332;fontSize=11;align=left;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="420" y="2095" width="330" height="98" as="geometry" />
+        </mxCell>
+        <mxCell id="s8Final" value="outputs/schedules/&#10;llm_current_final_schedule.csv&#10;actual for finished blocks +&#10;this run's forecast ahead&#10;(deliberately NOT the production filename)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D4EDDA;strokeColor=#1B4332;fontSize=11;align=left;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="770" y="2095" width="310" height="98" as="geometry" />
+        </mxCell>
+
+        <!-- ================= STAGE 9 FEEDBACK ================= -->
+        <mxCell id="s9Box" value="STAGE 9 — LEARN EVERY EVENING (no LLM)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#F3E8FF;strokeColor=#6B21A8;verticalAlign=top;align=left;spacingLeft=10;spacingTop=6;fontStyle=1;fontSize=12;fontColor=#6B21A8;" vertex="1" parent="1">
+          <mxGeometry x="400" y="2240" width="700" height="180" as="geometry" />
+        </mxCell>
+        <mxCell id="s9Feedback" value="actuals_feedback.py&#10;1  ATTACH real generation to every saved schedule&#10;2  LEARN — rebuild models/llm_case_store.csv from scored blocks&#10;3  MEASURE — recent daily bias → validator's adaptive band&#10;only REAL measurements scored; interpolated meter rows skipped" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#EDE0FA;strokeColor=#6B21A8;fontSize=11;align=left;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="420" y="2278" width="660" height="86" as="geometry" />
+        </mxCell>
+        <mxCell id="s9Note" value="Separate store from models/case_store.csv — that one feeds the production blend's validated +0.47 pts correction and must not be contaminated." style="text;html=1;fontSize=10;fontColor=#6B21A8;align=left;" vertex="1" parent="1">
+          <mxGeometry x="420" y="2372" width="660" height="30" as="geometry" />
+        </mxCell>
+
+        <!-- ================= RIGHT: CONFIG + STORES ================= -->
+        <mxCell id="cfgBox" value="CONFIG &amp; STORES" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#777777;dashed=1;verticalAlign=top;align=left;spacingLeft=10;spacingTop=6;fontStyle=1;fontSize=12;fontColor=#444444;" vertex="1" parent="1">
+          <mxGeometry x="1150" y="130" width="360" height="720" as="geometry" />
+        </mxCell>
+        <mxCell id="cfgSettings" value="config/settings.yaml (Sirmour = base)&#10;+ config/plants/&lt;key&gt;.yaml overlay&#10;selected by SOLAR_PLANT&#10;&#10;fusion.model: gemini-3.6-flash&#10;fusion.blend_weight: 0.5&#10;fusion.anchor_source: persistence&#10;fusion.level_strength: 0.55&#10;fusion.block_bias: false&#10;fusion.attach_images: true (2 layers)&#10;validator.max_deviation_fraction: 0.25&#10;schedule_rules.freeze_blocks: 6" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#EAEAEA;strokeColor=#777777;fontSize=11;align=left;spacingLeft=8;verticalAlign=top;spacingTop=6;" vertex="1" parent="1">
+          <mxGeometry x="1170" y="165" width="320" height="185" as="geometry" />
+        </mxCell>
+        <mxCell id="cfgData" value="data/historical/ — 39 days meter&#10;data/windy/values/ — scraped JSON&#10;data/windy/k1_screenshots/&#10;data/windy/new_videos/&#10;models/llm_case_store.csv&#10;windy_session.json (GITIGNORED)&#10;.env — GOOGLE_API_KEY per plant, AWS" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#EAEAEA;strokeColor=#777777;fontSize=11;align=left;spacingLeft=8;verticalAlign=top;spacingTop=6;" vertex="1" parent="1">
+          <mxGeometry x="1170" y="365" width="320" height="120" as="geometry" />
+        </mxCell>
+        <mxCell id="cfgScoring" value="SCORING &amp; EXPERIMENTS (offline, no quota)&#10;score_day_schedules.py — stitch a day, DSM penalty&#10;whatif_correction.py — price a candidate BEFORE importing&#10;sweep_blend_weight.py — re-tune the blend from saved runs&#10;backtest_llm_pipeline.py — replay past days, resumable&#10;export_day_schedule.py — report-format CSV&#10;measure_token_cost.py / measure_prompt_components.py" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#EAEAEA;strokeColor=#777777;fontSize=11;align=left;spacingLeft=8;verticalAlign=top;spacingTop=6;" vertex="1" parent="1">
+          <mxGeometry x="1170" y="500" width="320" height="130" as="geometry" />
+        </mxCell>
+        <mxCell id="cfgDsm" value="DSM SLABS (penalty)&#10;0–10%   free&#10;10–15%  Rs 0.50 / kWh&#10;15–20%  Rs 0.75 / kWh&#10;20%+    Rs 1.00 / kWh&#10;1 MW deviation for one block = 250 kWh" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#EAEAEA;strokeColor=#777777;fontSize=11;align=left;spacingLeft=8;verticalAlign=top;spacingTop=6;" vertex="1" parent="1">
+          <mxGeometry x="1170" y="645" width="320" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="cfgCost" value="COST — measured, gemini-3.6-flash&#10;input 36,648/day (21,360 text + 15,288 image)&#10;output 18,324/day (14,870 thinking + 3,454 visible)&#10;$0.1924/day → $70.23/yr → Rs 6,686/yr" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#EAEAEA;strokeColor=#777777;fontSize=11;align=left;spacingLeft=8;verticalAlign=top;spacingTop=6;" vertex="1" parent="1">
+          <mxGeometry x="1170" y="760" width="320" height="78" as="geometry" />
+        </mxCell>
+
+        <!-- ================= RIGHT: MEASURED RESULTS ================= -->
+        <mxCell id="resBox" value="MEASURED RESULTS — scored the mentor's way (stitched days, DSM penalty)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FFF4E6;strokeColor=#E8A33D;verticalAlign=top;align=left;spacingLeft=10;spacingTop=6;fontStyle=1;fontSize=12;fontColor=#8A5A00;" vertex="1" parent="1">
+          <mxGeometry x="1150" y="880" width="360" height="470" as="geometry" />
+        </mxCell>
+        <mxCell id="res12" value="12 DAYS (Jul 27 – Aug 7), 7 runs/day&#10;model            Rs 27,663   12.32%&#10;anchor only      Rs 17,411   10.25%&#10;→ the model is still Rs 10,252 WORSE" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFE8CC;strokeColor=#E8A33D;fontSize=11;align=left;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="1170" y="918" width="320" height="72" as="geometry" />
+        </mxCell>
+        <mxCell id="resBlend" value="BLEND SWEEP — monotonic, no optimum&#10;w=0.0 Rs 17,411 · 0.5 Rs 20,176 · 1.0 Rs 27,663&#10;every gram of weight given to the model costs money" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFE8CC;strokeColor=#E8A33D;fontSize=11;align=left;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="1170" y="1002" width="320" height="62" as="geometry" />
+        </mxCell>
+        <mxCell id="resAug10" value="AUG 10 — FIRST CLEAR WIN&#10;new pipeline   4.96%   93.3% in free band   Rs 9.91&#10;anchor only    5.73%                        Rs 110.24&#10;overcast day, called correctly on all 7 runs" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D4EDDA;strokeColor=#1B4332;fontSize=11;align=left;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="1170" y="1076" width="320" height="76" as="geometry" />
+        </mxCell>
+        <mxCell id="resDead" value="RULED OUT BY MEASUREMENT&#10;• Windy VIDEO features — LightGBM 11.34% vs&#10;   persistence 11.26%; 4 ROI sizes, 3 targets, both&#10;   our method and Team 1's port. Dead.&#10;• Weather as ANCHOR — Rs 17,786 vs 15,420&#10;• Block-shape bias on top of level — worse&#10;• 7 runs/day worse than 3 (more model = more cost)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FAD4D6;strokeColor=#C00000;fontSize=11;align=left;spacingLeft=8;verticalAlign=top;spacingTop=6;" vertex="1" parent="1">
+          <mxGeometry x="1170" y="1164" width="320" height="118" as="geometry" />
+        </mxCell>
+        <mxCell id="resOpen" value="STILL OPEN&#10;• Windy scraped NUMBERS — never scored&#10;   (no archive; only validates forward)&#10;• Enercast reference comparison — not built" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF9C4;strokeColor=#B8860B;fontSize=11;align=left;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="1170" y="1294" width="320" height="46" as="geometry" />
+        </mxCell>
+
+        <!-- ================= DESIGN RULES ================= -->
+        <mxCell id="rulesBox" value="THREE RULES THE WHOLE DESIGN OBEYS" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#1B4332;verticalAlign=top;align=left;spacingLeft=10;spacingTop=6;fontStyle=1;fontSize=12;fontColor=#1B4332;" vertex="1" parent="1">
+          <mxGeometry x="1150" y="1380" width="360" height="290" as="geometry" />
+        </mxCell>
+        <mxCell id="rule1" value="1 · PHYSICS IN PYTHON, JUDGEMENT IN THE LLM&#10;pvlib computes sunrise, tilt, azimuth, airmass exactly.&#10;The model only decides cloudiness. A kt of 1.4 is&#10;visibly wrong and gets clipped; &quot;4.9 MW at 5 pm&quot; is not." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D4EDDA;strokeColor=#1B4332;fontSize=11;align=left;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="1170" y="1418" width="320" height="72" as="geometry" />
+        </mxCell>
+        <mxCell id="rule2" value="2 · EVERY NUMBER SAYS HOW REAL IT IS&#10;windy_is_measured · windy_gap_minutes · sat_age_minutes&#10;The original features log copied one row across eight&#10;blocks and never said so — that is what this prevents." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D4EDDA;strokeColor=#1B4332;fontSize=11;align=left;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="1170" y="1502" width="320" height="72" as="geometry" />
+        </mxCell>
+        <mxCell id="rule3" value="3 · RULES ARE CODE, NEVER REQUESTS&#10;Freeze horizon and validator run AFTER the response.&#10;A model asked politely to skip six blocks will&#10;sometimes not, and &quot;sometimes&quot; is not a control." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D4EDDA;strokeColor=#1B4332;fontSize=11;align=left;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="1170" y="1586" width="320" height="72" as="geometry" />
+        </mxCell>
+
+        <!-- ================= EDGES: main flow ================= -->
+        <mxCell id="e0" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#1F4E9C;strokeWidth=2;endArrow=block;" edge="1" parent="1" source="s0Box" target="s1Box">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e1" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#1F4E9C;strokeWidth=2;endArrow=block;" edge="1" parent="1" source="s1Box" target="s2Box">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e2" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#1B4332;strokeWidth=2;endArrow=block;" edge="1" parent="1" source="s2Box" target="s3Box">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e3" value="the feature table is the output AND the next stage's input" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#C00000;strokeWidth=3;endArrow=block;fontSize=10;fontColor=#C00000;" edge="1" parent="1" source="s3Box" target="s4Box">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e4" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#1F4E9C;strokeWidth=2;endArrow=block;" edge="1" parent="1" source="s4Box" target="s5Box">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e5" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#1B4332;strokeWidth=2;endArrow=block;" edge="1" parent="1" source="s5Box" target="s8Box">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e6" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#6B21A8;strokeWidth=2;endArrow=block;" edge="1" parent="1" source="s8Box" target="s9Box">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- feedback loop back into stage 4 -->
+        <mxCell id="eFeedback" value="tomorrow's precedent, track record and level factor" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#6B21A8;strokeWidth=2;dashed=1;endArrow=block;exitX=0;exitY=0.5;entryX=0;entryY=0.9;fontSize=10;fontColor=#6B21A8;" edge="1" parent="1" source="s9Box" target="s4Box">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="370" y="2330" />
+              <mxPoint x="370" y="1660" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- external → stages -->
+        <mxCell id="eW1" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#E8A33D;strokeWidth=2;endArrow=block;dashed=1;" edge="1" parent="1" source="extWindyWww" target="s1Scraper">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="eW2" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#E8A33D;strokeWidth=2;endArrow=block;dashed=1;" edge="1" parent="1" source="extWindyEmbed" target="s1Scraper">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="eG" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#C00000;strokeWidth=2;endArrow=block;dashed=1;" edge="1" parent="1" source="extGemini" target="s4Call">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="360" y="357" />
+              <mxPoint x="360" y="1533" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="eM" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#E8A33D;strokeWidth=2;endArrow=block;dashed=1;" edge="1" parent="1" source="extMeteo" target="s3Weather">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="380" y="436" />
+              <mxPoint x="380" y="1165" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="eI" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#E8A33D;strokeWidth=2;endArrow=block;dashed=1;" edge="1" parent="1" source="extInbox" target="s0Inbox">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="eS3" value="clips in / schedules out" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#E8A33D;strokeWidth=2;endArrow=block;dashed=1;startArrow=block;fontSize=10;" edge="1" parent="1" source="extS3" target="s1Clip">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- footer -->
+        <mxCell id="footer" value="14 pipeline stages · exactly ONE calls an LLM · everything else is deterministic Python, OpenCV, pvlib and arithmetic. Every stage degrades rather than fails — a missing scrape, an unreachable S3 or no satellite clip narrows what the model sees and is logged, but does not stop a schedule being published. The LLM is the one exception, deliberately: publishing a physics-only schedule under this pipeline's name would misreport what produced it." style="text;html=1;fontSize=11;fontColor=#444444;align=left;verticalAlign=top;" vertex="1" parent="1">
+          <mxGeometry x="40" y="2460" width="1470" height="60" as="geometry" />
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
