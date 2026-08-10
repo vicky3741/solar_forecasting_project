@@ -64,6 +64,48 @@ def run_clock(path):
     return f"{match.group(2)}:{match.group(3)}" if match else None
 
 
+def sample_images():
+    """
+    One real screenshot per configured image layer - the same files a
+    live run would attach. Returns [] when images are switched off or
+    none have been captured yet.
+    """
+
+    fusion = settings.get("fusion", {})
+
+    if not fusion.get("attach_images", False):
+        return []
+
+    layers = fusion.get("image_layers", ["satellite", "clouds"])
+    limit = int(fusion.get("max_images", 2))
+
+    folders = [
+        Path(settings.get("windy_capture_k1", {}).get(
+            "screenshot_dir", "data/windy/k1_screenshots"
+        )),
+        Path(settings.get("windy_capture", {}).get(
+            "screenshot_dir", "data/windy/screenshots"
+        )),
+    ]
+
+    chosen = []
+
+    for layer in layers:
+
+        for folder in folders:
+
+            found = sorted(folder.glob(f"*_{layer}.png")) if folder.exists() else []
+
+            if found:
+                chosen.append(found[-1])
+                break
+
+        if len(chosen) >= limit:
+            break
+
+    return chosen
+
+
 def count_tokens(client, model, texts):
     """
     Exact input token counts from Google's tokenizer. countTokens does
@@ -126,6 +168,36 @@ def main():
 
     counts = count_tokens(gemini.client, model, texts)
 
+    # ---- images ----
+    # Measured, never assumed. countTokens is asked for the text alone
+    # and then for text+images, and the difference IS the image cost.
+    # Quoting a per-image figure from anywhere else would be a guess
+    # about our own screenshots' resolution.
+    image_paths = sample_images()
+    image_tokens = 0
+
+    if image_paths:
+
+        from google.genai import types
+
+        parts = [texts[0]] + [
+            types.Part.from_bytes(
+                data=Path(p).read_bytes(), mime_type="image/png"
+            )
+            for p in image_paths
+        ]
+
+        with_images = gemini.client.models.count_tokens(
+            model=model, contents=parts
+        ).total_tokens
+
+        image_tokens = int(with_images) - counts[0]
+
+        print(f"\nimages attached per call   : {len(image_paths)} "
+              f"({', '.join(Path(p).name for p in image_paths)})")
+        print(f"image tokens per call      : {image_tokens:,} "
+              f"({image_tokens / len(image_paths):,.0f} per image)")
+
     frame = pd.DataFrame({
         "prompt": [p.name for p in paths],
         "run_time": [run_clock(p) for p in paths],
@@ -153,11 +225,15 @@ def main():
 
     covered = [t for t in run_times if t in per_run_mean]
 
-    daily_input = sum(per_run_mean[t] for t in covered)
+    daily_text = sum(per_run_mean[t] for t in covered)
+    daily_images = image_tokens * len(covered)
+    daily_input = daily_text + daily_images
 
     print(f"\nscheduling times measured  : {len(covered)} of {len(run_times)} "
           f"({', '.join(covered)})")
-    print(f"input tokens for one day   : {daily_input:,.0f}")
+    print(f"text input for one day     : {daily_text:,.0f}")
+    print(f"image input for one day    : {daily_images:,.0f}")
+    print(f"TOTAL input for one day    : {daily_input:,.0f}")
 
     measurements = {
         "model": model,
@@ -173,8 +249,12 @@ def main():
         },
         "run_times_measured": covered,
         "run_times_configured": run_times,
+        "daily_text_input_tokens": float(daily_text),
+        "daily_image_input_tokens": float(daily_images),
         "daily_input_tokens": float(daily_input),
-        "images_attached": 0,
+        "images_attached": len(image_paths),
+        "image_tokens_per_call": int(image_tokens),
+        "image_files": [Path(p).name for p in image_paths],
         "output": None,
     }
 
@@ -197,6 +277,19 @@ def main():
 
         per_run_output = {}
 
+        # The same images a live run would attach, so the measured
+        # output reflects a real request rather than a text-only one -
+        # a model given pictures may reason differently about them.
+        image_parts = []
+
+        if image_paths:
+            image_parts = [
+                types.Part.from_bytes(
+                    data=Path(p).read_bytes(), mime_type="image/png"
+                )
+                for p in image_paths
+            ]
+
         for clock in covered:
 
             candidates = frame[frame["run_time"] == clock]
@@ -206,7 +299,9 @@ def main():
             index = candidates["input_tokens"].idxmax()
 
             response = gemini.client.models.generate_content(
-                model=model, contents=[texts[index]], config=config
+                model=model,
+                contents=[texts[index]] + image_parts,
+                config=config,
             )
 
             usage = response.usage_metadata

@@ -412,6 +412,20 @@ fusion:
   # Verified callable on this key before being set.
   model: gemini-3.6-flash
 
+  # Attach the Windy layer screenshots to the call, so the model SEES the
+  # sky as well as reading the OpenCV numbers computed from it.
+  #
+  # This is the expensive knob in the whole pipeline. Images dominate
+  # input cost - measure with tests/measure_token_cost.py after changing
+  # either setting rather than assuming the effect is small.
+  #
+  # Sent IN ADDITION to the numeric features, not instead of them: the
+  # numbers are exact and free to compute, the picture carries structure
+  # a statistic cannot (where a front sits, banded vs scattered cloud).
+  attach_images: true
+  image_layers: [satellite, clouds]
+  max_images: 2
+
   # What the model returns per block.
   #   kt  - clear-sky index 0-1.2, multiplied here by the pvlib clear-sky
   #         curve to get MW. The model still decides every block; it just

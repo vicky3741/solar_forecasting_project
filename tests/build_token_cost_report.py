@@ -206,18 +206,42 @@ def build(measurements, out_path):
         body,
     ))
 
-    story.append(Paragraph(
-        "<b>Images are captured, but never sent.</b> The pipeline does record "
-        "the Windy satellite clip and the layer screenshots &mdash; Playwright "
-        "writes them to disk at each scheduling time. OpenCV then reads those "
-        "files <i>locally</i> and reduces them to numbers: thin/thick cloud "
-        "percentages, texture entropy, optical-flow divergence and vorticity, "
-        "quadrant cloud fractions. Only those numbers enter the prompt, as "
-        "text. The image files themselves are never uploaded to the API, so "
-        "they contribute zero input tokens. The vision work happens on our "
-        "own machine, at no per-token cost.",
-        body,
-    ))
+    images_n = measurements.get("images_attached", 0)
+    image_tokens = measurements.get("image_tokens_per_call", 0)
+
+    if images_n:
+        story.append(Paragraph(
+            f"<b>Each call sends {images_n} Windy layer screenshot(s)</b> "
+            f"({', '.join(measurements.get('image_files', []))}) alongside the "
+            f"text. Measured at <b>{image_tokens:,} input tokens per call</b>, "
+            f"or {image_tokens / images_n:,.0f} per image &mdash; obtained by "
+            f"asking countTokens for the text alone and then for text plus "
+            f"images, and taking the difference. Quoting a per-image figure "
+            f"from anywhere else would be a guess about our own screenshots' "
+            f"resolution.",
+            body,
+        ))
+
+        story.append(Paragraph(
+            "The images are sent <b>in addition to</b>, not instead of, the "
+            "OpenCV numbers. Both describe the same sky: the numbers are "
+            "exact and cost nothing to compute (thin/thick cloud percentages, "
+            "texture entropy, optical-flow divergence and vorticity, quadrant "
+            "fractions), while the picture carries structure a summary "
+            "statistic cannot &mdash; where a front sits, whether cloud is "
+            "banded or scattered. The seven live calls below were made "
+            "<i>with</i> the images attached, so the output figures reflect a "
+            "real request rather than a text-only one.",
+            body,
+        ))
+    else:
+        story.append(Paragraph(
+            "<b>No images are attached in this configuration.</b> The Windy "
+            "clip and screenshots are still captured and read locally by "
+            "OpenCV, but only the resulting numbers enter the prompt, so "
+            "images contribute zero input tokens.",
+            body,
+        ))
 
     # ---------- 2. per-call ----------
     story.append(Paragraph("2. Per-Call Measurements, by Scheduling Time", h2))
@@ -363,15 +387,31 @@ def build(measurements, out_path):
         output["daily_visible_output_tokens"] / 1e6 * rates["output"]
     )
 
+    text_input = measurements.get("daily_text_input_tokens", daily_input)
+    image_input = measurements.get("daily_image_input_tokens", 0)
+
+    text_cost = text_input / 1e6 * rates["input"]
+    image_cost = image_input / 1e6 * rates["input"]
+
     rows = [["Component", "Tokens/day", "Cost/day (USD)", "Share of bill"]]
 
-    for label, tokens, spend in (
-        ("Input — the prompt", daily_input, in_cost),
+    components = [
+        ("Input — text prompt", text_input, text_cost),
+    ]
+
+    if image_input:
+        components.append(
+            (f"Input — {images_n} screenshot(s)", image_input, image_cost)
+        )
+
+    components += [
         ("Output — visible answer", output["daily_visible_output_tokens"],
          visible_cost),
         ("Output — thinking (never shown)",
          output["daily_thinking_tokens"], thinking_cost),
-    ):
+    ]
+
+    for label, tokens, spend in components:
         rows.append([
             label, f"{tokens:,.0f}", money(spend),
             f"{spend / total_cost * 100:.1f}%",
@@ -396,14 +436,30 @@ def build(measurements, out_path):
     ))
 
     story.append(Paragraph(
-        "The prompt itself is cheap. Sending more evidence &mdash; more "
-        "precedent, more input history, more Windy layers &mdash; costs "
-        f"{rates['input'] / rates['output']:.2f} of what an equivalent "
+        "The text prompt itself is cheap. Extra evidence &mdash; more "
+        "precedent, more history, more Windy columns &mdash; costs "
+        f"{rates['input'] / rates['output']:.2f} of what the equivalent "
         "amount of extra reasoning costs. On these rates, giving the model "
         "better information is roughly six times cheaper than letting it "
         "think longer.",
         note,
     ))
+
+    if image_input:
+        story.append(Paragraph(
+            f"<b>Images are the costliest thing we can add to a prompt.</b> "
+            f"{images_n} screenshots are "
+            f"{image_input / text_input * 100:.0f}% as many tokens as the "
+            f"entire text prompt &mdash; every column, every retrieved case, "
+            f"every block of the day &mdash; and they are "
+            f"{image_cost / total_cost * 100:.0f}% of the bill. Each "
+            f"additional layer attached adds about "
+            f"{image_tokens / images_n * len(measurements['run_times_measured']):,.0f} "
+            f"tokens a day. Worth it only if the picture changes decisions "
+            f"the OpenCV numbers would not have changed, which is a question "
+            f"for the accuracy scoring rather than this report.",
+            note,
+        ))
 
     # ---------- 6. scaling ----------
     story.append(Paragraph("6. Scaling to Multiple Sites", h2))

@@ -11,6 +11,7 @@ import os
 import random
 import re
 import time
+from pathlib import Path
 
 from google import genai
 from google.genai import types
@@ -108,7 +109,7 @@ class GeminiClient:
     # --------------------------------------------------
 
     def generate_text(self, prompt, temperature=None, max_output_tokens=None,
-                      model=None):
+                      model=None, images=None):
         """
         A plain text-in / text-out call, sharing every protection the
         frame path already has: per-model daily-quota detection, the
@@ -138,10 +139,32 @@ class GeminiClient:
 
         # `model` lets the scheduling pipeline pick its own model without
         # touching vision.model, which the LIVE vision path also reads.
-        # The two jobs have different needs: the vision path sends image
-        # frames, this one sends a numeric table, and their token costs
-        # and thinking volumes differ enough to be chosen separately.
-        return self.call_with_fallback([prompt], config, primary=model)
+        # The two jobs have different needs and their token costs and
+        # thinking volumes differ enough to be chosen separately.
+        contents = [prompt]
+
+        # Images ride ALONGSIDE the prompt, not instead of it: the OpenCV
+        # numbers stay in the text. They are near-free to compute and
+        # exact, where a picture asks the model to judge by eye - so
+        # attaching the image adds a second view rather than replacing a
+        # measurement with an impression.
+        for path in (images or []):
+
+            path = Path(path)
+
+            if not path.exists():
+                self.logger.warning(f"Image not found, skipping: {path}")
+                continue
+
+            contents.append(
+                types.Part.from_bytes(
+                    data=path.read_bytes(),
+                    mime_type="image/png" if path.suffix.lower() == ".png"
+                    else "image/jpeg",
+                )
+            )
+
+        return self.call_with_fallback(contents, config, primary=model)
 
     # --------------------------------------------------
 

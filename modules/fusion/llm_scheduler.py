@@ -63,6 +63,7 @@ from config.config import settings
 from modules.fusion.validator import ScheduleValidator, recent_daily_bias
 from modules.scheduling.effective_time import apply_freeze, freeze_window
 from modules.vision.json_parser import JSONParser
+from modules.vision.vision_module import VisionModule
 from utils.logger import get_logger
 
 
@@ -229,6 +230,92 @@ class LLMScheduler:
             bias = []
 
         return self.validator.suggested_max_deviation_fraction(bias)
+
+    # --------------------------------------------------
+
+    def run_images(self, run_time):
+        """
+        The Windy layer screenshots to attach to this run's call, newest
+        at or before run_time.
+
+        Sent IN ADDITION to the OpenCV numbers, not instead of them. The
+        numbers are exact and cost nothing to compute; the image lets the
+        model see structure a summary statistic cannot carry - where a
+        front sits, whether cloud is banded or scattered. Two views of
+        the same sky, one measured and one seen.
+
+        Images are the expensive part of a request, so this is capped by
+        config and every attachment is logged: an image silently added is
+        an image silently billed.
+        """
+
+        fusion = settings.get("fusion", {})
+
+        if not fusion.get("attach_images", False):
+            return []
+
+        wanted = fusion.get("image_layers", ["satellite", "clouds"])
+        limit = int(fusion.get("max_images", 2))
+
+        folders = [
+            Path(settings.get("windy_capture_k1", {}).get(
+                "screenshot_dir", "data/windy/k1_screenshots"
+            )),
+            Path(settings.get("windy_capture", {}).get(
+                "screenshot_dir", "data/windy/screenshots"
+            )),
+        ]
+
+        run_time = pd.Timestamp(run_time)
+
+        if run_time.tz is not None:
+            run_time = run_time.tz_convert(self.timezone).tz_localize(None)
+
+        chosen = []
+
+        for layer in wanted:
+
+            best = None
+
+            for folder in folders:
+
+                if not folder.exists():
+                    continue
+
+                for path in folder.glob(f"*_{layer}.png"):
+
+                    stamp = VisionModule.parse_video_time(path.name)
+
+                    if stamp is None:
+                        continue
+
+                    # Same day, at or before the run - never a picture
+                    # the run could not have had.
+                    if (
+                        stamp.date() == run_time.date()
+                        and pd.Timestamp(stamp) <= run_time
+                        and (best is None or stamp > best[0])
+                    ):
+                        best = (stamp, path)
+
+            if best is not None:
+                chosen.append(best[1])
+
+            if len(chosen) >= limit:
+                break
+
+        if chosen:
+            self.logger.info(
+                f"Attaching {len(chosen)} image(s) to the call: "
+                + ", ".join(p.name for p in chosen)
+            )
+        else:
+            self.logger.info(
+                "No same-day layer screenshots at or before this run - "
+                "sending the numeric features only"
+            )
+
+        return chosen
 
     # --------------------------------------------------
 
@@ -767,11 +854,16 @@ RESPOND WITH JSON ONLY, no prose outside it, in exactly this form:
         if dry_run:
             return None, meta
 
+        images = self.run_images(run_time)
+
+        meta["images_attached"] = [Path(p).name for p in images]
+
         response = self.client().generate_text(
             prompt,
             temperature=self.temperature,
             max_output_tokens=self.max_output_tokens,
             model=self.model,
+            images=images,
         )
 
         payload = self.parser.parse(response)
