@@ -399,6 +399,37 @@ class LLMScheduler:
 
         columns = [c for c in _PROMPT_COLUMNS if c in ahead.columns]
 
+        # DROP COLUMNS THAT ARE ENTIRELY EMPTY FOR THIS RUN.
+        #
+        # The block table is by far the largest part of the prompt -
+        # measured at 62% of the text on the 06:45 run - and on any run
+        # without scraped Windy values six of its columns are nothing but
+        # "n/a" repeated once per block. That is 47 rows of a word that
+        # carries no information, in the most expensive section of the
+        # request.
+        #
+        # The columns kept always include block, time and the two the
+        # model is asked to reason from, even if those were somehow
+        # empty, so the table can never collapse to something the
+        # instructions still refer to.
+        always = {"block", "time", "clearsky_power_mw", "anchor_kt"}
+
+        columns = [
+            c for c in columns
+            if c in always or ahead[c].notna().any()
+        ]
+
+        dropped = [
+            c for c in _PROMPT_COLUMNS
+            if c in ahead.columns and c not in columns
+        ]
+
+        if dropped:
+            self.logger.info(
+                f"Prompt table: omitting {len(dropped)} all-empty column(s) "
+                f"({', '.join(dropped)})"
+            )
+
         header = " | ".join(f"{c}" for c in columns)
 
         lines = [header, "-" * len(header)]
@@ -643,6 +674,9 @@ split matters more than the total.
 value was interpolated between readings up to 90 minutes apart. Free-tier Windy \
 only updates every 3 hours, so today only {measured} of the remaining blocks \
 carry a real reading. Trust the 1s; treat the 0s as a smooth guess between them.
+
+Any column not present in the table above had no data for this run and has been \
+omitted rather than filled with placeholders.
 
 YOUR JOB
 Each block above already has an anchor - the physics baseline, listed as \
