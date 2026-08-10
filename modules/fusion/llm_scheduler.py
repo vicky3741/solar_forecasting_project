@@ -94,6 +94,8 @@ class LLMScheduler:
         self.cases = CaseRetriever()
         self.block_bias = LLMBlockBias()
 
+        self._choppiness_reference = None
+
         plant = settings["plant"]
 
         self.plant_name = plant.get("name", "the plant")
@@ -611,6 +613,26 @@ cloud DIRECTION is not measurable from it and is not reported."""
 
         track_record = self.track_record_section(run_time)
 
+        from modules.preprocessing.intraday_shape import (
+            history_choppiness, prompt_section as intraday_section
+        )
+
+        # Today's choppiness only means something against this plant's
+        # own normal. Computed once per process and reused: it reads the
+        # meter and runs pvlib over ten days, which is wasted work if
+        # repeated for every run of a backtest.
+        if self._choppiness_reference is None:
+            try:
+                self._choppiness_reference = history_choppiness(run_time)
+            except Exception as error:
+                self.logger.warning(
+                    f"Choppiness reference unavailable ({error}) - reporting "
+                    "today's numbers without a comparison"
+                )
+                self._choppiness_reference = []
+
+        intraday = intraday_section(features, self._choppiness_reference)
+
         # Counted over the blocks actually IN the table, not over every
         # remaining block of the day. Windy's 3-hourly steps land at
         # 08:30/11:30/14:30/17:30/20:30/23:30, so counting the whole
@@ -637,6 +659,8 @@ cloud DIRECTION is not measurable from it and is not reported."""
 
 WHAT THE PLANT HAS ACTUALLY GENERATED TODAY SO FAR
 {history}
+{("WHAT KIND OF DAY TODAY HAS BEEN" + chr(10) + intraday + chr(10))
+ if intraday else ""}
 
 CURRENT SKY OBSERVATION (satellite)
 {sky}
