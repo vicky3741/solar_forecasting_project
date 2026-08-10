@@ -1,4 +1,4 @@
-"""
+﻿"""
 =========================================================
 Solar Forecasting Project - NEW APPROACH
 Price a candidate BEFORE importing it
@@ -232,6 +232,75 @@ def price(by_day, meter, strength, lookback, smooth_blocks, min_days,
                 )
                 applied = True
 
+        # BAND SHIFT - exploit the shape of the penalty, not the error.
+        #
+        # DSM charges nothing inside +/-10% of capacity (+/-0.51 MW here)
+        # and rises in slabs beyond it. So the objective is not "be
+        # closest on average", it is "land inside a 1.02 MW window".
+        #
+        # That makes a DOWNWARD bias close to free. If the forecast was
+        # already right, shifting down by less than the band leaves it
+        # still inside and still costs nothing; if the forecast was too
+        # high - which this pipeline is, 5.2% over on 4 of 5 recent days
+        # - the shift pulls it back toward the band.
+        #
+        # Priced rather than assumed, because it is only free while the
+        # shift stays small relative to the band and while the bias
+        # really is one-directional.
+        # BAND-ADAPTIVE - the same idea, but the DIRECTION is measured
+        # rather than assumed. A fixed downward shift only pays while
+        # the pipeline is over-forecasting; if the bias ever flips, a
+        # hard-coded "always schedule lower" turns from insurance into
+        # a second error. Here the sign comes from recent residuals and
+        # the size stays capped by the band.
+        elif candidate == "band-adaptive":
+
+            if len(history) >= min_days:
+
+                combined = pd.concat(history[-lookback:], ignore_index=True)
+
+                bias = float(
+                    (combined["actual_mw"] - combined["scheduled_mw"]).mean()
+                )
+
+                # bias < 0 means actual came in BELOW schedule, i.e. we
+                # over-forecast, so the schedule should come down.
+                direction = -1.0 if bias < 0 else 1.0
+
+                shift = direction * strength * 0.10 * CAPACITY_MW
+
+                corrected = np.clip(corrected + shift, 0.0, CAPACITY_MW)
+                applied = True
+
+        elif candidate in ("band-shift", "level+band", "band-adaptive"):
+
+            # level+band applies the multiplier FIRST, then the shift -
+            # the order the pipeline would use, and not the same as the
+            # reverse: a multiplier scales whatever the shift left
+            # behind, so shifting first would shrink the shift itself.
+            if candidate == "level+band":
+
+                factor = (
+                    learn_level(history[-lookback:])
+                    if len(history) >= min_days else None
+                )
+
+                if factor is not None:
+                    corrected = np.clip(
+                        corrected * (1 + shape_strength * (factor - 1)),
+                        0.0, CAPACITY_MW,
+                    )
+
+            # Gated on the SAME history requirement as every other
+            # candidate. Without this it fired from day one while the
+            # adaptive variant waited for four days of evidence, and the
+            # resulting comparison flattered it by Rs 3,586 purely
+            # because it was applied to more days.
+            if len(history) >= min_days:
+                shift = strength * 0.10 * CAPACITY_MW
+                corrected = np.clip(corrected - shift, 0.0, CAPACITY_MW)
+                applied = True
+
         elif candidate == "level":
 
             factor = (
@@ -292,7 +361,7 @@ def main():
     parser.add_argument("--smooth", type=int, default=None)
     parser.add_argument(
         "--candidate", default="block-bias",
-        choices=("block-bias", "level", "both"),
+        choices=("block-bias", "level", "both", "band-shift", "level+band", "band-adaptive"),
         help="block-bias = one shift per block (time-of-day shape); "
              "level = one multiplier for the whole day; both = level "
              "then shape, as the pipeline would apply them"
