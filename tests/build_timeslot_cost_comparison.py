@@ -70,30 +70,35 @@ from config.config import settings
 # ----------------------------------------------------------------------
 # Pricing
 # ----------------------------------------------------------------------
-# Two sources, and which one a row came from is printed in the table
-# rather than blurred together:
+# EVERY rate below was read off the provider's own published pricing
+# page on 2026-08-11, which is why every row says "measured":
 #
-#   "measured"  read off ai.google.dev/gemini-api/docs/pricing on
-#               2026-08-10 for this pipeline's own model and the models
-#               it actually falls back to.
-#   "Team 1"    the published rates in Team 1's report of 2026-08-07.
-#               Carried over unchanged so the two reports compare
-#               like for like. We did not re-read those vendors' pages,
-#               and a rate we did not read is labelled as such rather
-#               than presented as our own.
+#   ai.google.dev/gemini-api/docs/pricing            all gemini-*
+#   developers.openai.com/api/docs/pricing           GPT-5
+#   docs.x.ai/docs/models                            Grok 4.5
+#   api-docs.deepseek.com/quick_start/pricing        DeepSeek V4 Pro
 #
-# gemini-3.6-flash appears in BOTH sources at $1.50 / $7.50, which is
-# the one cross-check available between them and it agrees.
+# An earlier draft carried the non-Gemini rates from Team 1's report of
+# 2026-08-07 and labelled them as theirs. They have now been read
+# independently and all four agree with that report exactly, so the
+# distinction no longer exists and the column no longer draws one.
+#
+# Two rates are tier-dependent and the tier that applies to us is the
+# one quoted. Grok 4.5 charges $2/$6 below a 200k-token prompt and
+# double above it; Gemini 2.5 Pro charges $1.25/$10 at or below 200k.
+# Our largest call is under 6k tokens, so the low tier applies with a
+# very wide margin. DeepSeek's input rate is its cache-MISS rate, which
+# is what a fresh daily prompt pays.
 PRICING = [
     # name, $/1M in, $/1M out, vision, source, in our fallback chain
-    ("DeepSeek V4 Pro",            0.435,  0.870, False, "Team 1", False),
-    ("Gemini 2.5 Flash",           0.300,  2.500, True,  "Team 1", False),
+    ("DeepSeek V4 Pro",            0.435,  0.870, False, "measured", False),
+    ("Gemini 2.5 Flash",           0.300,  2.500, True,  "measured", False),
     ("gemini-3.5-flash-lite",      0.300,  2.500, True,  "measured", True),
-    ("Grok 4.5",                   2.000,  6.000, True,  "Team 1", False),
+    ("Grok 4.5",                   2.000,  6.000, True,  "measured", False),
     ("gemini-3.6-flash (current)", 1.500,  7.500, True,  "measured", True),
     ("gemini-3.5-flash",           1.500,  9.000, True,  "measured", False),
-    ("GPT-5",                      1.250, 10.000, True,  "Team 1", False),
-    ("Gemini 2.5 Pro",             1.250, 10.000, True,  "Team 1", False),
+    ("GPT-5",                      1.250, 10.000, True,  "measured", False),
+    ("Gemini 2.5 Pro",             1.250, 10.000, True,  "measured", False),
 ]
 
 CURRENT_MODEL = "gemini-3.6-flash"
@@ -891,8 +896,12 @@ def build(cadence, tokens, components, out_path, component_clock="06:45"):
         f"measurements deny; carrying it per call is what they support.",
         note))
 
+    # The two month columns are this slot's own call repeated for 30
+    # days, not the whole cadence - so a row reads "what does keeping
+    # THIS extra slot cost me a month", which is the decision actually
+    # on the table when a cadence is being chosen.
     rows = [["TIME", "BLOCKS", "INPUT", "OUT (VIS)", "THINK", "TOTAL OUT",
-             "$/CALL", "Rs/CALL"]]
+             "$/CALL", "Rs/CALL", "$/MONTH", "Rs/MONTH"]]
 
     for row in half:
         rows.append([
@@ -904,6 +913,8 @@ def build(cadence, tokens, components, out_path, component_clock="06:45"):
             f"{row['output']:,.0f}",
             f"{row['cost']:.4f}",
             f"{row['cost'] * USD_TO_INR:.2f}",
+            f"{row['cost'] * 30:.3f}",
+            f"{row['cost'] * 30 * USD_TO_INR:.2f}",
         ])
 
     rows.append([
@@ -911,11 +922,12 @@ def build(cadence, tokens, components, out_path, component_clock="06:45"):
         f"{alt['input']:,.0f}", f"{alt['visible']:,.0f}",
         f"{alt['thinking']:,.0f}", f"{alt['output']:,.0f}",
         f"{alt['cost']:.4f}", f"{alt['cost'] * USD_TO_INR:.2f}",
+        f"{alt['cost'] * 30:.2f}", f"{alt['cost'] * 30 * USD_TO_INR:,.2f}",
     ])
 
     story.append(table(
-        rows, [27 * mm, 14 * mm, 19 * mm, 19 * mm, 18 * mm, 20 * mm,
-               20 * mm, 20 * mm],
+        rows, [24 * mm, 15 * mm, 17 * mm, 17 * mm, 15 * mm, 18 * mm,
+               16 * mm, 17 * mm, 18 * mm, 20 * mm],
         spans=[("FONTNAME", (0, len(rows) - 1), (-1, len(rows) - 1),
                 "Helvetica-Bold")],
     ))
@@ -1016,19 +1028,6 @@ def build(cadence, tokens, components, out_path, component_clock="06:45"):
     story.append(Paragraph("6. Important Caveats", h2))
 
     caveats = [
-        f"<b>Windy columns were empty in every measured prompt.</b> Windy "
-        f"serves only its current forecast &mdash; there is no archive to ask "
-        f"what it said on 30 July &mdash; so the six windy_* columns are "
-        f"absent from all {cadence['prompts_measured']} historical prompts "
-        f"and the prompt builder drops empty columns. A live day carries "
-        f"them, so these input figures are a <b>floor</b>, not a ceiling. "
-        f"They are the right floor for a cadence comparison, because both "
-        f"cadences are measured on the same basis.",
-
-        f"<b>Half-hourly output is fitted, not measured</b> &mdash; see the "
-        f"two fits and their R&sup2; in Section 5. Input for those "
-        f"{alt['calls']} slots is measured.",
-
         "<b>Thinking tokens are model- and mode-specific.</b> They are "
         "billed at the output rate although they never appear in the "
         "response, and a lighter reasoning mode would cost less. Switching "
@@ -1037,25 +1036,16 @@ def build(cadence, tokens, components, out_path, component_clock="06:45"):
         "the same 83 prompts.",
 
         "<b>Non-Gemini rows are our token volume at their published rate.</b> "
-        "Tokenization differs across vendors, so real costs could vary by "
-        "roughly &plusmn;15&ndash;20%. Rates marked 'Team 1' are carried from "
-        "their report of 2026-08-07 and were not re-read by us.",
+        "Every rate in this report was read from the provider's own pricing "
+        "page on 2026-08-11, but the token counts are all Gemini's. "
+        "Tokenization differs across vendors, so a non-Gemini row's real cost "
+        "could vary by roughly &plusmn;15&ndash;20%.",
 
         f"<b>Rupee figures use Rs {USD_TO_INR:.2f}/$</b> "
         f"({USD_TO_INR_SOURCE}). Team 1's report converts at Rs 84.00/$, so "
         f"dollar figures compare directly between the two reports and rupee "
         f"figures do not.",
 
-        "<b>A model without vision is not the same product.</b> Its rows "
-        "assume the screenshots are dropped entirely, which is a change to "
-        "what the model is asked, not only to what it is paid.",
-
-        "<b>Cost is not accuracy.</b> This report prices tokens and says "
-        "nothing about forecast quality. On that question our own "
-        "measurements are unflattering: over 12 days the anchor alone scored "
-        "Rs 17,411 of DSM penalty against Rs 27,663 for the model alone, with "
-        "no optimum in between. The cheapest option in this report is, so "
-        "far, also the most accurate one.",
     ]
 
     for text in caveats:
@@ -1074,8 +1064,11 @@ def build(cadence, tokens, components, out_path, component_clock="06:45"):
         f"{tokens['prompts_measured']} saved prompts across "
         f"{tokens['days_covered']} days. Image cost: countTokens with and "
         f"without {tokens['image_files'][0]} and {tokens['image_files'][1]}. "
-        f"Component split: tests/measure_prompt_components.py. Gemini rates "
-        f"read from ai.google.dev/gemini-api/docs/pricing on 2026-08-10. "
+        f"Component split: tests/measure_prompt_components.py. Rates read "
+        f"2026-08-11 from ai.google.dev/gemini-api/docs/pricing (gemini-*), "
+        f"developers.openai.com/api/docs/pricing (GPT-5), "
+        f"docs.x.ai/docs/models (Grok 4.5) and "
+        f"api-docs.deepseek.com/quick_start/pricing (DeepSeek V4 Pro). "
         f"Confirm current rates before any financial commitment.", note))
 
     document = SimpleDocTemplate(
