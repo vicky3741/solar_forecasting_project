@@ -131,6 +131,15 @@ class Scheduler:
             "subprocess_timeout_seconds", 180
         )
 
+        # The parallel zoom-11 capture. Off unless explicitly enabled,
+        # and read separately from the one above so that turning it on
+        # or off can never disturb the capture production depends on.
+        k1_settings = settings.get("windy_capture_k1", {})
+        self.k1_capture_enabled = k1_settings.get("enabled", False)
+        self.k1_capture_timeout = k1_settings.get(
+            "subprocess_timeout_seconds", 420
+        )
+
         # A forecast run takes ~40s (model load, S3 pull, vision, blend,
         # push); this is a hard kill for one that hangs, generous enough
         # to survive a slow network day.
@@ -153,42 +162,68 @@ class Scheduler:
 
     # --------------------------------------------------
 
-    def capture_video(self):
+    def run_capture(self, module, label, timeout):
         """
-        Runs one Windy capture in its own process. Never
-        raises - the forecast must go ahead even if the
-        capture fails, since S3 usually has a recent clip
-        from Team 3's feed to fall back on.
+        Runs one capture in its own process. Never raises - the forecast
+        must go ahead even if a capture fails, since S3 usually has a
+        recent clip from Team 3's feed to fall back on.
         """
-
-        if not self.capture_enabled:
-            return
 
         try:
             result = subprocess.run(
-                [sys.executable, "-m", "modules.capture.windy_capture"],
+                [sys.executable, "-m", module],
                 capture_output=True,
                 text=True,
-                timeout=self.capture_timeout,
+                timeout=timeout,
                 env=self.child_env
             )
 
             if result.returncode == 0:
-                self.logger.info("Windy capture completed")
+                self.logger.info(f"{label} completed")
             else:
                 self.logger.error(
-                    f"Windy capture exited {result.returncode}: "
+                    f"{label} exited {result.returncode}: "
                     f"{result.stderr.strip()[-500:]}"
                 )
 
         except subprocess.TimeoutExpired:
             self.logger.error(
-                f"Windy capture timed out after {self.capture_timeout}s "
+                f"{label} timed out after {timeout}s "
                 "- continuing to the forecast"
             )
 
         except Exception as error:
-            self.logger.error(f"Windy capture could not start: {error}")
+            self.logger.error(f"{label} could not start: {error}")
+
+    # --------------------------------------------------
+
+    def capture_video(self):
+        """
+        Every capture configured for this run time, each in its own
+        process, in order.
+
+        The zoom-8 embed capture is FIRST and its result is what
+        production reads. The zoom-11 k1 capture runs after it purely to
+        accumulate a parallel archive for
+        tests/compare_capture_zoom.py; it writes to its own folders and
+        nothing consumes it until satellite.source says so. Ordering
+        matters: if the second capture hangs to its timeout, the first
+        one's clip is already on disk and the forecast still has it.
+        """
+
+        if self.capture_enabled:
+            self.run_capture(
+                "modules.capture.windy_capture",
+                "Windy capture (embed, zoom 8)",
+                self.capture_timeout,
+            )
+
+        if self.k1_capture_enabled:
+            self.run_capture(
+                "modules.capture.windy_capture_k1",
+                "Windy capture (k1, zoom 11)",
+                self.k1_capture_timeout,
+            )
 
     # --------------------------------------------------
 

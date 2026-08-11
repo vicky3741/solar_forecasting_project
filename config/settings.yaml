@@ -550,12 +550,52 @@ fusion:
 # session file from `python -m modules.capture.windy_login`. Without it the
 # capture still runs but premium layers may come back empty.
 windy_capture_k1:
-  enabled: false           # opt-in; nothing schedules this yet
+  # ON, as a PARALLEL capture, 2026-08-11. It runs at every scheduling
+  # time alongside windy_capture and writes to its own folders. Nothing
+  # reads its output yet - satellite.source below is still "embed" - so
+  # production sees exactly what it saw yesterday.
+  #
+  # WHY THE SECOND CAPTURE IS WORTH IT. windy_capture records at zoom 8,
+  # where one pixel is ~556 m at Sirmour and a 1280-px frame spans
+  # ~712 km. That framing was chosen when the consumer was a vision LLM
+  # looking at a picture. The consumer is now
+  # modules/vision/satellite_features.py, which wants a MEASUREMENT of
+  # the sky over the plant - and at zoom 8 a 40 km box is 72 pixels
+  # across. At zoom 11 the same 40 km is 575 pixels. Cropping cannot
+  # recover resolution that was never captured, so this has to be fixed
+  # in the capture, not in the extractor.
+  #
+  # Run both for a few days, score with tests/compare_capture_zoom.py,
+  # and switch satellite.source on the result rather than the argument.
+  enabled: true
   zoom: 11
   layers: [satellite, wind, solarpower, clouds, rain]
   record_seconds: 8
   screenshot_dir: data/windy/k1_screenshots
   video_dir: data/windy/k1_videos
+  # Generous next to windy_capture's 300: this drives the full
+  # www.windy.com application rather than the embed, over five layers.
+  subprocess_timeout_seconds: 420
+
+# Which captured clip the satellite features are read from, and how much
+# ground they measure.
+satellite:
+  # embed | k1 | auto
+  #   embed  windy_capture's zoom-8 clip. The default, and what every
+  #          measurement in this repo so far was taken on.
+  #   k1     windy_capture_k1's zoom-11 clip.
+  #   auto   k1 when a same-day one exists at or before the run time,
+  #          embed otherwise. Do NOT use this during the comparison: it
+  #          would mix the two sources inside one backtest and make the
+  #          result unreadable.
+  source: embed
+
+  # Ground box actually measured, in km, or null to keep the historic
+  # 0.6 centre-crop fraction. Null on purpose - setting it would change
+  # the features every existing backtest was scored on. The comparison
+  # script passes it explicitly instead, which is the only place the two
+  # zooms can be put on one footing.
+  roi_km: null
 
 # Where fresh meter exports are dropped by hand before being copied into
 # data/historical (modules/preprocessing/meter_inbox.py). Confirmed with

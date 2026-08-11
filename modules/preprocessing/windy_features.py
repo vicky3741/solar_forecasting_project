@@ -659,24 +659,56 @@ class WindyFeatureBuilder:
         if run_time.tz is not None:
             run_time = run_time.tz_convert(self.timezone).tz_localize(None)
 
-        folders = [
+        # Which capture this run reads from. The two sources are framed
+        # very differently - zoom 8 spans ~712 km, zoom 11 ~111 km - so
+        # the source is returned alongside the clip and its zoom is
+        # handed to the extractor. Reading a zoom-11 clip while assuming
+        # zoom 8 would silently measure a quarter of the intended
+        # ground box.
+        source = settings.get("satellite", {}).get("source", "embed")
+
+        embed = [
             Path(settings.get("windy_capture", {}).get(
                 "video_dir", "data/windy/new_videos"
             )),
             Path(settings["paths"]["windy_data"]) / "videos",
         ]
 
-        for folder in folders:
+        k1 = [Path(settings.get("windy_capture_k1", {}).get(
+            "video_dir", "data/windy/k1_videos"
+        ))]
 
-            if not folder.exists():
-                continue
+        if source == "k1":
+            order = [("k1", k1)]
+        elif source == "auto":
+            order = [("k1", k1), ("embed", embed)]
+        else:
+            order = [("embed", embed)]
 
-            found = vision.find_latest_video(folder, run_time)
+        for name, folders in order:
 
-            if found is not None:
-                return found
+            for folder in folders:
 
-        return None
+                if not folder.exists():
+                    continue
+
+                found = vision.find_latest_video(folder, run_time)
+
+                if found is not None:
+                    return found, name
+
+        return None, None
+
+    # --------------------------------------------------
+
+    def clip_zoom(self, source):
+        """The map zoom the given capture records at."""
+
+        block = "windy_capture_k1" if source == "k1" else "windy_capture"
+
+        return settings.get(block, {}).get(
+            "zoom", 11 if source == "k1" else 8
+        )
 
     # --------------------------------------------------
 
@@ -694,7 +726,7 @@ class WindyFeatureBuilder:
         rather than as per-block data.
         """
 
-        clip = self.find_satellite_clip(run_time)
+        clip, source = self.find_satellite_clip(run_time)
 
         if clip is None:
             self.logger.info(
@@ -707,7 +739,17 @@ class WindyFeatureBuilder:
         from modules.vision.satellite_features import extract_for
         from modules.vision.vision_module import VisionModule
 
-        features = extract_for(clip)
+        # roi_km stays None unless configured, which keeps the historic
+        # 0.6 centre-crop. When it IS set, zoom decides how many pixels
+        # that ground box is, so it has to match the clip in hand.
+        roi_km = settings.get("satellite", {}).get("roi_km")
+
+        features = extract_for(
+            clip,
+            roi_km=roi_km,
+            zoom=self.clip_zoom(source),
+            latitude=settings["plant"]["latitude"],
+        )
 
         if features is None:
             grid["sat_age_minutes"] = np.nan
@@ -730,11 +772,14 @@ class WindyFeatureBuilder:
             grid["sat_age_minutes"] = np.nan
 
         for key, value in features.items():
-            if key not in ("sat_video", "sat_captured_at"):
+            if key not in ("sat_video", "sat_captured_at", "sat_source"):
                 grid[key] = value
 
+        features["sat_source"] = source
+
         self.logger.info(
-            f"Satellite features from {Path(clip).name}: "
+            f"Satellite features from {Path(clip).name} "
+            f"[{source}, zoom {self.clip_zoom(source)}]: "
             f"thick {features['sat_thick_cloud_pct']}%, "
             f"thin {features['sat_thin_cloud_pct']}%, "
             f"entropy {features['sat_entropy']}, "
