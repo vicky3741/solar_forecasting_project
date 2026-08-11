@@ -1,0 +1,100 @@
+{
+  "model": "gemini-3.6-flash",
+  "prompts_measured": 83,
+  "days_covered": 12,
+  "input_tokens_mean": 3060.8072289156626,
+  "input_tokens_min": 2275,
+  "input_tokens_max": 3685,
+  "input_tokens_by_run_time": {
+    "06:45": 3502.6666666666665,
+    "08:15": 3620.1666666666665,
+    "09:45": 3407.6666666666665,
+    "11:15": 3125.1666666666665,
+    "12:45": 2867.9166666666665,
+    "14:15": 2560.25,
+    "15:45": 2276.4545454545455
+  },
+  "run_times_measured": [
+    "06:45",
+    "08:15",
+    "09:45",
+    "11:15",
+    "12:45",
+    "14:15",
+    "15:45"
+  ],
+  "run_times_configured": [
+    "06:45",
+    "08:15",
+    "09:45",
+    "11:15",
+    "12:45",
+    "14:15",
+    "15:45"
+  ],
+  "daily_text_input_tokens": 21360.287878787876,
+  "daily_image_input_tokens": 15288.0,
+  "daily_input_tokens": 36648.28787878787,
+  "images_attached": 2,
+  "image_tokens_per_call": 2184,
+  "image_files": [
+    "SIRMOUR_2026-08-09_20-21-07_satellite.png",
+    "SIRMOUR_2026-08-09_20-21-07_clouds.png"
+  ],
+  "output": {
+    "by_run_time": {
+      "06:45": {
+        "prompt_token_count": 5869,
+        "visible_output_tokens": 707,
+        "thinking_tokens": 2558,
+        "billable_output_tokens": 3265,
+        "measured_on_prompt": "SIRMOUR_2026-08-02_06-45_prompt.txt"
+      },
+      "08:15": {
+        "prompt_token_count": 5840,
+        "visible_output_tokens": 626,
+        "thinking_tokens": 2259,
+        "billable_output_tokens": 2885,
+        "measured_on_prompt": "SIRMOUR_2026-07-28_08-15_prompt.txt"
+      },
+      "09:45": {
+        "prompt_token_count": 5595,
+        "visible_output_tokens": 558,
+        "thinking_tokens": 1615,
+        "billable_output_tokens": 2173,
+        "measured_on_prompt": "SIRMOUR_2026-08-06_09-45_prompt.txt"
+      },
+      "11:15": {
+        "prompt_token_count": 5311,
+        "visible_output_tokens": 501,
+        "thinking_tokens": 2306,
+        "billable_output_tokens": 2807,
+        "measured_on_prompt": "SIRMOUR_2026-07-29_11-15_prompt.txt"
+      },
+      "12:45": {
+        "prompt_token_count": 5333,
+        "visible_output_tokens": 478,
+        "thinking_tokens": 3177,
+        "billable_output_tokens": 3655,
+        "measured_on_prompt": "SIRMOUR_2026-08-03_12-45_prompt.txt"
+      },
+      "14:15": {
+        "prompt_token_count": 4746,
+        "visible_output_tokens": 331,
+        "thinking_tokens": 1448,
+        "billable_output_tokens": 1779,
+        "measured_on_prompt": "SIRMOUR_2026-07-29_14-15_prompt.txt"
+      },
+      "15:45": {
+        "prompt_token_count": 4463,
+        "visible_output_tokens": 253,
+        "thinking_tokens": 1507,
+        "billable_output_tokens": 1760,
+        "measured_on_prompt": "SIRMOUR_2026-08-04_15-45_prompt.txt"
+      }
+    },
+    "daily_billable_output_tokens": 18324,
+    "daily_visible_output_tokens": 3454,
+    "daily_thinking_tokens": 14870
+  }
+}

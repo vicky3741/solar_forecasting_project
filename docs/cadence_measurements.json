@@ -1,0 +1,307 @@
+{
+  "model": "gemini-3.6-flash",
+  "days": [
+    "2026-08-05",
+    "2026-08-06",
+    "2026-08-07"
+  ],
+  "prompts_measured": 87,
+  "run_times": [
+    "06:45",
+    "07:00",
+    "07:30",
+    "08:00",
+    "08:15",
+    "08:30",
+    "09:00",
+    "09:30",
+    "09:45",
+    "10:00",
+    "10:30",
+    "11:00",
+    "11:15",
+    "11:30",
+    "12:00",
+    "12:30",
+    "12:45",
+    "13:00",
+    "13:30",
+    "14:00",
+    "14:15",
+    "14:30",
+    "15:00",
+    "15:30",
+    "15:45",
+    "16:00",
+    "16:30",
+    "17:00",
+    "17:30"
+  ],
+  "by_run_time": {
+    "06:45": {
+      "days": 3,
+      "blocks": 47,
+      "blocks_varies": false,
+      "input_tokens_mean": 3147.0,
+      "input_tokens_min": 3059,
+      "input_tokens_max": 3290,
+      "days_with_satellite": 0
+    },
+    "07:00": {
+      "days": 3,
+      "blocks": 46,
+      "blocks_varies": false,
+      "input_tokens_mean": 3359.3333333333335,
+      "input_tokens_min": 3271,
+      "input_tokens_max": 3503,
+      "days_with_satellite": 3
+    },
+    "07:30": {
+      "days": 3,
+      "blocks": 44,
+      "blocks_varies": false,
+      "input_tokens_mean": 3541.0,
+      "input_tokens_min": 3464,
+      "input_tokens_max": 3662,
+      "days_with_satellite": 3
+    },
+    "08:00": {
+      "days": 3,
+      "blocks": 42,
+      "blocks_varies": false,
+      "input_tokens_mean": 3538.0,
+      "input_tokens_min": 3477,
+      "input_tokens_max": 3618,
+      "days_with_satellite": 3
+    },
+    "08:15": {
+      "days": 3,
+      "blocks": 41,
+      "blocks_varies": false,
+      "input_tokens_mean": 3540.3333333333335,
+      "input_tokens_min": 3497,
+      "input_tokens_max": 3595,
+      "days_with_satellite": 3
+    },
+    "08:30": {
+      "days": 3,
+      "blocks": 40,
+      "blocks_varies": false,
+      "input_tokens_mean": 3541.0,
+      "input_tokens_min": 3506,
+      "input_tokens_max": 3576,
+      "days_with_satellite": 3
+    },
+    "09:00": {
+      "days": 3,
+      "blocks": 38,
+      "blocks_varies": false,
+      "input_tokens_mean": 3526.6666666666665,
+      "input_tokens_min": 3521,
+      "input_tokens_max": 3530,
+      "days_with_satellite": 3
+    },
+    "09:30": {
+      "days": 3,
+      "blocks": 36,
+      "blocks_varies": false,
+      "input_tokens_mean": 3475.0,
+      "input_tokens_min": 3469,
+      "input_tokens_max": 3482,
+      "days_with_satellite": 3
+    },
+    "09:45": {
+      "days": 3,
+      "blocks": 35,
+      "blocks_varies": false,
+      "input_tokens_mean": 3453.0,
+      "input_tokens_min": 3452,
+      "input_tokens_max": 3455,
+      "days_with_satellite": 3
+    },
+    "10:00": {
+      "days": 3,
+      "blocks": 34,
+      "blocks_varies": false,
+      "input_tokens_mean": 3418.6666666666665,
+      "input_tokens_min": 3411,
+      "input_tokens_max": 3424,
+      "days_with_satellite": 3
+    },
+    "10:30": {
+      "days": 3,
+      "blocks": 32,
+      "blocks_varies": false,
+      "input_tokens_mean": 3357.0,
+      "input_tokens_min": 3351,
+      "input_tokens_max": 3364,
+      "days_with_satellite": 3
+    },
+    "11:00": {
+      "days": 3,
+      "blocks": 30,
+      "blocks_varies": false,
+      "input_tokens_mean": 3289.0,
+      "input_tokens_min": 3286,
+      "input_tokens_max": 3292,
+      "days_with_satellite": 3
+    },
+    "11:15": {
+      "days": 3,
+      "blocks": 29,
+      "blocks_varies": false,
+      "input_tokens_mean": 3267.3333333333335,
+      "input_tokens_min": 3255,
+      "input_tokens_max": 3274,
+      "days_with_satellite": 3
+    },
+    "11:30": {
+      "days": 3,
+      "blocks": 28,
+      "blocks_varies": false,
+      "input_tokens_mean": 3241.0,
+      "input_tokens_min": 3237,
+      "input_tokens_max": 3244,
+      "days_with_satellite": 3
+    },
+    "12:00": {
+      "days": 3,
+      "blocks": 26,
+      "blocks_varies": false,
+      "input_tokens_mean": 3179.0,
+      "input_tokens_min": 3178,
+      "input_tokens_max": 3181,
+      "days_with_satellite": 3
+    },
+    "12:30": {
+      "days": 3,
+      "blocks": 24,
+      "blocks_varies": false,
+      "input_tokens_mean": 3118.3333333333335,
+      "input_tokens_min": 3115,
+      "input_tokens_max": 3120,
+      "days_with_satellite": 3
+    },
+    "12:45": {
+      "days": 3,
+      "blocks": 23,
+      "blocks_varies": false,
+      "input_tokens_mean": 3076.6666666666665,
+      "input_tokens_min": 3070,
+      "input_tokens_max": 3087,
+      "days_with_satellite": 3
+    },
+    "13:00": {
+      "days": 3,
+      "blocks": 22,
+      "blocks_varies": false,
+      "input_tokens_mean": 3057.3333333333335,
+      "input_tokens_min": 3054,
+      "input_tokens_max": 3062,
+      "days_with_satellite": 3
+    },
+    "13:30": {
+      "days": 3,
+      "blocks": 20,
+      "blocks_varies": false,
+      "input_tokens_mean": 2991.6666666666665,
+      "input_tokens_min": 2990,
+      "input_tokens_max": 2995,
+      "days_with_satellite": 3
+    },
+    "14:00": {
+      "days": 3,
+      "blocks": 18,
+      "blocks_varies": false,
+      "input_tokens_mean": 2923.3333333333335,
+      "input_tokens_min": 2912,
+      "input_tokens_max": 2930,
+      "days_with_satellite": 3
+    },
+    "14:15": {
+      "days": 3,
+      "blocks": 17,
+      "blocks_varies": false,
+      "input_tokens_mean": 2894.0,
+      "input_tokens_min": 2882,
+      "input_tokens_max": 2902,
+      "days_with_satellite": 3
+    },
+    "14:30": {
+      "days": 3,
+      "blocks": 16,
+      "blocks_varies": false,
+      "input_tokens_mean": 2861.3333333333335,
+      "input_tokens_min": 2849,
+      "input_tokens_max": 2870,
+      "days_with_satellite": 3
+    },
+    "15:00": {
+      "days": 3,
+      "blocks": 14,
+      "blocks_varies": false,
+      "input_tokens_mean": 2799.3333333333335,
+      "input_tokens_min": 2787,
+      "input_tokens_max": 2808,
+      "days_with_satellite": 3
+    },
+    "15:30": {
+      "days": 3,
+      "blocks": 12,
+      "blocks_varies": false,
+      "input_tokens_mean": 2732.6666666666665,
+      "input_tokens_min": 2727,
+      "input_tokens_max": 2742,
+      "days_with_satellite": 3
+    },
+    "15:45": {
+      "days": 3,
+      "blocks": 11,
+      "blocks_varies": false,
+      "input_tokens_mean": 2701.3333333333335,
+      "input_tokens_min": 2695,
+      "input_tokens_max": 2711,
+      "days_with_satellite": 3
+    },
+    "16:00": {
+      "days": 3,
+      "blocks": 10,
+      "blocks_varies": false,
+      "input_tokens_mean": 2670.6666666666665,
+      "input_tokens_min": 2665,
+      "input_tokens_max": 2682,
+      "days_with_satellite": 3
+    },
+    "16:30": {
+      "days": 3,
+      "blocks": 8,
+      "blocks_varies": false,
+      "input_tokens_mean": 2611.3333333333335,
+      "input_tokens_min": 2601,
+      "input_tokens_max": 2617,
+      "days_with_satellite": 3
+    },
+    "17:00": {
+      "days": 3,
+      "blocks": 6,
+      "blocks_varies": false,
+      "input_tokens_mean": 2481.3333333333335,
+      "input_tokens_min": 2475,
+      "input_tokens_max": 2492,
+      "days_with_satellite": 3
+    },
+    "17:30": {
+      "days": 3,
+      "blocks": 4,
+      "blocks_varies": false,
+      "input_tokens_mean": 2421.0,
+      "input_tokens_min": 2414,
+      "input_tokens_max": 2433,
+      "days_with_satellite": 3
+    }
+  },
+  "daily_text_input_tokens": 90213.66666666666,
+  "total_blocks_per_day": 753,
+  "windy_columns_present": false,
+  "note": "Input tokens only. Output and thinking tokens need real generateContent calls and are measured at the seven production times by tests/measure_token_cost.py --live."
+}

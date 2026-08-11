@@ -1,0 +1,10 @@
+component,tokens,share_pct
+Block table (the forecast rows),1322,36.77329624478442
+Today's measured generation so far,639,17.774687065368568
+Column explanations,422,11.738525730180807
+Retrieved precedent (similar past days),277,7.705146036161335
+Input track record,238,6.620305980528513
+Task instructions,224,6.230876216968011
+Satellite sky observation,224,6.230876216968011
+Output format spec,186,5.17385257301808
+"Header — plant, capacity, current time",71,1.9749652294853963
