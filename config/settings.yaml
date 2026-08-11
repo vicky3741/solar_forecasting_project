@@ -435,10 +435,36 @@ fusion:
   #   mw  - the model emits megawatts directly.
   llm_output: kt
   max_clear_sky_index: 1.2
-  # BACK ON, now that the wiring is fixed. Weather is INFORMATION in the
-  # prompt only; it is no longer the validator's anchor (see
-  # anchor_source below). The two roles are separate, which is what made
-  # 2026-07-27 so expensive - one wrong forecast was applied twice.
+  # STAYS ON, and now for a measured reason rather than an argued one.
+  #
+  # The user's standing rule (2026-08-11) is that any input other than
+  # the Windy capture keeps its place only while it is MEASURED to
+  # help. Applying that rule needed a scoreboard, and there was none:
+  # of 90 saved schedules, not one carried both a weather value and a
+  # measured outcome, so modules/evaluation/input_skill.py could only
+  # ever report meter persistence. Running actuals_feedback over every
+  # saved run fixed that.
+  #
+  # Scored on 6 days where weather and actuals both exist
+  # (2026-08-01..05 and 08-10), as standalone per-block forecasts:
+  #
+  #     the model's own unblended call    8.1%   best on 2 of 5 days
+  #     ECMWF weather (bias-corrected)    9.9%   best on 1 of 5 days
+  #     meter persistence                11.5%   best on 2 of 5 days
+  #     Windy's own solar forecast       49.8%   best on 0 of 5 days
+  #
+  # Weather beats the anchor this pipeline leans on. The rule therefore
+  # does NOT fire, and it stays.
+  #
+  # WHAT IS STILL OWED. The older figure that argued for switching it
+  # off - Rs 17,786 with weather against Rs 15,420 without, over 12
+  # days - was measured when weather was the validator's ANCHOR as well
+  # as a prompt column, so one wrong forecast was applied twice; on
+  # 2026-07-27 the validator adjusted 30 of 35 blocks. That wiring is
+  # fixed (anchor_source: persistence below), which makes the figure
+  # stale rather than wrong. It has not been re-measured in rupees
+  # post-fix, and rupees is the mentor's metric. Until that sweep runs,
+  # "weather helps" is a block-error result, not a money result.
   use_weather: true
 
   # What the validator measures the model against. NOT a forecast.
