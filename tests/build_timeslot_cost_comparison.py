@@ -115,10 +115,21 @@ CURRENT_MODEL = "gemini-3.6-flash"
 USD_TO_INR = 95.21
 USD_TO_INR_SOURCE = "ECB reference rate, 2026-08-07 (frankfurter.dev)"
 
-DARK = colors.HexColor("#1B4332")
-ACCENT = colors.HexColor("#1F4E9C")
+# Sampled from the reference report so the two documents sit together
+# without one looking like a different product. Its tables carry no
+# vertical rules, a navy header and total band, and every summary line
+# sits in a cream callout box - which is the part that makes it read
+# well, so it is copied rather than approximated.
+DARK = colors.HexColor("#293648")        # header and total bands
+ACCENT = colors.HexColor("#1F4E9C")      # section headings
 WARN = colors.HexColor("#9A3412")
-GREY = colors.HexColor("#F2F4F6")
+GREY = colors.HexColor("#F6F9FA")        # alternate row
+RULE = colors.HexColor("#DDE3E8")        # the only line inside a table
+CREAM = colors.HexColor("#F4F1E9")       # callout box
+CREAM_EDGE = colors.HexColor("#E3DCC9")
+HILITE = colors.HexColor("#F6EFE2")      # the row for the model we run
+WARN_BG = colors.HexColor("#FDF0E7")
+WARN_EDGE = colors.HexColor("#F0C9AE")
 MUTED = colors.HexColor("#555555")
 
 
@@ -452,7 +463,7 @@ def build(cadence, tokens, components, out_path, component_clock="06:45"):
     )
     h3 = ParagraphStyle(
         "h3", parent=styles["Heading3"], fontName="Helvetica-Bold",
-        fontSize=9.5, textColor=DARK, spaceBefore=8, spaceAfter=3,
+        fontSize=9.5, textColor=DARK, spaceBefore=6, spaceAfter=3,
     )
     body = ParagraphStyle(
         "body", parent=styles["Normal"], fontSize=8.8, leading=12.6,
@@ -474,6 +485,25 @@ def build(cadence, tokens, components, out_path, component_clock="06:45"):
         spaceAfter=5, leftIndent=13,
     )
 
+    head = ParagraphStyle(
+        "head", parent=styles["Normal"], fontName="Helvetica-Bold",
+        fontSize=7.2, leading=8.6, textColor=colors.white,
+    )
+    headr = ParagraphStyle("headr", parent=head, alignment=2)
+
+    def hrow(labels, align_right_from=1):
+        """
+        Header cells as Paragraphs so a long label such as
+        "COST/MONTH (USD)" wraps onto a second line instead of running
+        into the next column - which is what the reference report does
+        and what a plain string in a Table cell cannot do.
+        """
+
+        return [
+            Paragraph(text, headr if index >= align_right_from else head)
+            for index, text in enumerate(labels)
+        ]
+
     def table(data, widths, align_right_from=1, header=True, spans=None):
 
         style = [
@@ -481,12 +511,14 @@ def build(cadence, tokens, components, out_path, component_clock="06:45"):
             ("FONTNAME", (0, 0), (-1, -1), "Helvetica"),
             ("ALIGN", (align_right_from, 1), (-1, -1), "RIGHT"),
             ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-            ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#C8CDD3")),
+            # Horizontal rules only. Vertical lines make a wide table
+            # look like a spreadsheet; the reference has none.
+            ("LINEBELOW", (0, 1), (-1, -2), 0.4, RULE),
             ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, GREY]),
-            ("TOPPADDING", (0, 0), (-1, -1), 3),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
-            ("LEFTPADDING", (0, 0), (-1, -1), 4),
-            ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+            ("TOPPADDING", (0, 0), (-1, -1), 2.8),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 2.8),
+            ("LEFTPADDING", (0, 0), (-1, -1), 5),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 5),
         ]
 
         if header:
@@ -494,6 +526,8 @@ def build(cadence, tokens, components, out_path, component_clock="06:45"):
                 ("BACKGROUND", (0, 0), (-1, 0), DARK),
                 ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
                 ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                ("TOPPADDING", (0, 0), (-1, 0), 4.5),
+                ("BOTTOMPADDING", (0, 0), (-1, 0), 4.5),
             ]
 
         for extra in (spans or []):
@@ -501,6 +535,35 @@ def build(cadence, tokens, components, out_path, component_clock="06:45"):
 
         return Table(data, colWidths=widths, style=TableStyle(style),
                      hAlign="LEFT", repeatRows=1 if header else 0)
+
+    def total_row(row_index):
+        """The navy summary band the reference puts under every table."""
+
+        return [
+            ("BACKGROUND", (0, row_index), (-1, row_index), DARK),
+            ("TEXTCOLOR", (0, row_index), (-1, row_index), colors.white),
+            ("FONTNAME", (0, row_index), (-1, row_index), "Helvetica-Bold"),
+            ("TOPPADDING", (0, row_index), (-1, row_index), 4.5),
+            ("BOTTOMPADDING", (0, row_index), (-1, row_index), 4.5),
+        ]
+
+    def callout(text, style=body, warn=False):
+        """One boxed line, the way the reference frames every summary."""
+
+        return Table(
+            [[Paragraph(text, style)]],
+            colWidths=[182 * mm],
+            style=TableStyle([
+                ("BACKGROUND", (0, 0), (-1, -1), WARN_BG if warn else CREAM),
+                ("BOX", (0, 0), (-1, -1), 0.6,
+                 WARN_EDGE if warn else CREAM_EDGE),
+                ("TOPPADDING", (0, 0), (-1, -1), 6),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+                ("LEFTPADDING", (0, 0), (-1, -1), 8),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+            ]),
+            hAlign="LEFT",
+        )
 
     story = []
 
@@ -604,8 +667,7 @@ def build(cadence, tokens, components, out_path, component_clock="06:45"):
         ])
 
     highlight = [
-        ("BACKGROUND", (0, LLM_STEP), (-1, LLM_STEP),
-         colors.HexColor("#FFE8D6")),
+        ("BACKGROUND", (0, LLM_STEP), (-1, LLM_STEP), HILITE),
         ("TEXTCOLOR", (3, LLM_STEP), (3, LLM_STEP), WARN),
     ]
 
@@ -614,7 +676,9 @@ def build(cadence, tokens, components, out_path, component_clock="06:45"):
         align_right_from=5, spans=highlight,
     ))
 
-    story.append(Paragraph(
+    story.append(Spacer(1, 5))
+
+    story.append(callout(
         f"<b>Why this matters for cost:</b> every dollar and every token in "
         f"Sections 2&ndash;5 comes ENTIRELY from step {LLM_STEP}. The other "
         f"{len(STAGES) - 1} steps run at zero marginal API cost no matter how "
@@ -766,8 +830,11 @@ def build(cadence, tokens, components, out_path, component_clock="06:45"):
         f"{current[0]['blocks']} blocks and the {current[-1]['clock']} run "
         f"asks for {current[-1]['blocks']}.", body))
 
-    rows = [["TIME SLOT", "BLOCKS", "INPUT", "OUT (VISIBLE)", "THINKING",
-             "TOTAL OUT", "COST (USD)", "COST (INR)"]]
+    rows = [hrow([
+        "TIME SLOT", "BLOCKS", "INPUT", "OUT (VISIBLE)", "THINKING",
+        "TOTAL OUT", "COST (USD)", "COST (INR)", "COST/MONTH (USD)",
+        "COST/MONTH (INR)",
+    ])]
 
     for row in current:
         rows.append([
@@ -777,32 +844,39 @@ def build(cadence, tokens, components, out_path, component_clock="06:45"):
             f"{row['visible']:,.0f}",
             f"{row['thinking']:,.0f}",
             f"{row['output']:,.0f}",
-            f"{row['cost']:.4f}",
-            f"{row['cost'] * USD_TO_INR:.2f}",
+            f"${row['cost']:.4f}",
+            f"Rs {row['cost'] * USD_TO_INR:.2f}",
+            f"${row['cost'] * 30:.2f}",
+            f"Rs {row['cost'] * 30 * USD_TO_INR:.2f}",
         ])
 
     rows.append([
         f"TOTAL ({now['calls']} calls)", f"{now['blocks']}",
         f"{now['input']:,.0f}", f"{now['visible']:,.0f}",
         f"{now['thinking']:,.0f}", f"{now['output']:,.0f}",
-        f"{now['cost']:.4f}", f"{now['cost'] * USD_TO_INR:.2f}",
+        f"${now['cost']:.4f}", f"Rs {now['cost'] * USD_TO_INR:.2f}",
+        f"${now['cost'] * 30:.2f}",
+        f"Rs {now['cost'] * 30 * USD_TO_INR:.2f}",
     ])
 
     story.append(table(
-        rows, [26 * mm, 14 * mm, 19 * mm, 22 * mm, 19 * mm, 19 * mm,
-               21 * mm, 20 * mm],
-        spans=[("FONTNAME", (0, len(rows) - 1), (-1, len(rows) - 1),
-                "Helvetica-Bold")],
+        rows, [22 * mm, 15 * mm, 16 * mm, 17 * mm, 16 * mm, 16 * mm,
+               16 * mm, 17 * mm, 22 * mm, 21 * mm],
+        spans=total_row(len(rows) - 1),
     ))
 
-    story.append(Paragraph(
-        f"Per month: {money(now['cost'] * 30)} "
+    story.append(Spacer(1, 5))
+
+    story.append(callout(
+        f"<b>Per month:</b> {money(now['cost'] * 30)} "
         f"({rupees(now['cost'] * 30)}) &nbsp;|&nbsp; "
-        f"Per year: {money(now['cost'] * 365)} "
+        f"<b>Per year:</b> {money(now['cost'] * 365)} "
         f"({rupees(now['cost'] * 365)}) &nbsp;|&nbsp; "
-        f"Across all three plants: "
+        f"<b>All three plants:</b> "
         f"{money(now['cost'] * 365 * 3)} "
-        f"({rupees(now['cost'] * 365 * 3)}) per year.", body))
+        f"({rupees(now['cost'] * 365 * 3)}) per year"))
+
+    story.append(Spacer(1, 4))
 
     thinking_share = now["thinking"] / now["output"] * 100
     thinking_cost = now["thinking"] / 1e6 * rate_out
@@ -840,7 +914,9 @@ def build(cadence, tokens, components, out_path, component_clock="06:45"):
 
     story.append(model_table(now, table, cell))
 
-    story.append(Paragraph(
+    story.append(Spacer(1, 5))
+
+    story.append(callout(
         "<b>*</b> in this pipeline's own configured model chain &mdash; the "
         "primary model or one of its fallbacks. A model not in that chain has "
         "never been called with our key and is priced here for comparison "
@@ -900,8 +976,10 @@ def build(cadence, tokens, components, out_path, component_clock="06:45"):
     # days, not the whole cadence - so a row reads "what does keeping
     # THIS extra slot cost me a month", which is the decision actually
     # on the table when a cadence is being chosen.
-    rows = [["TIME", "BLOCKS", "INPUT", "OUT (VIS)", "THINK", "TOTAL OUT",
-             "$/CALL", "Rs/CALL", "$/MONTH", "Rs/MONTH"]]
+    rows = [hrow([
+        "TIME", "BLOCKS", "INPUT", "OUT (VIS)", "THINK", "TOTAL OUT",
+        "COST (USD)", "COST (INR)", "COST/MONTH (USD)", "COST/MONTH (INR)",
+    ])]
 
     for row in half:
         rows.append([
@@ -911,34 +989,38 @@ def build(cadence, tokens, components, out_path, component_clock="06:45"):
             f"{row['visible']:,.0f}",
             f"{row['thinking']:,.0f}",
             f"{row['output']:,.0f}",
-            f"{row['cost']:.4f}",
-            f"{row['cost'] * USD_TO_INR:.2f}",
-            f"{row['cost'] * 30:.3f}",
-            f"{row['cost'] * 30 * USD_TO_INR:.2f}",
+            f"${row['cost']:.4f}",
+            f"Rs {row['cost'] * USD_TO_INR:.2f}",
+            f"${row['cost'] * 30:.2f}",
+            f"Rs {row['cost'] * 30 * USD_TO_INR:.2f}",
         ])
 
     rows.append([
         f"TOTAL ({alt['calls']} calls/day)", f"{alt['blocks']}",
         f"{alt['input']:,.0f}", f"{alt['visible']:,.0f}",
         f"{alt['thinking']:,.0f}", f"{alt['output']:,.0f}",
-        f"{alt['cost']:.4f}", f"{alt['cost'] * USD_TO_INR:.2f}",
-        f"{alt['cost'] * 30:.2f}", f"{alt['cost'] * 30 * USD_TO_INR:,.2f}",
+        f"${alt['cost']:.4f}", f"Rs {alt['cost'] * USD_TO_INR:.2f}",
+        f"${alt['cost'] * 30:.2f}",
+        f"Rs {alt['cost'] * 30 * USD_TO_INR:,.2f}",
     ])
 
     story.append(table(
-        rows, [24 * mm, 15 * mm, 17 * mm, 17 * mm, 15 * mm, 18 * mm,
-               16 * mm, 17 * mm, 18 * mm, 20 * mm],
-        spans=[("FONTNAME", (0, len(rows) - 1), (-1, len(rows) - 1),
-                "Helvetica-Bold")],
+        rows, [23 * mm, 15 * mm, 16 * mm, 16 * mm, 15 * mm, 15 * mm,
+               16 * mm, 17 * mm, 22 * mm, 21 * mm],
+        spans=total_row(len(rows) - 1),
     ))
 
     increase = (alt["cost"] / now["cost"] - 1) * 100
 
-    story.append(Paragraph(
-        f"Per month: {money(alt['cost'] * 30)} "
+    story.append(Spacer(1, 5))
+
+    story.append(callout(
+        f"<b>Per month:</b> {money(alt['cost'] * 30)} "
         f"({rupees(alt['cost'] * 30)}) &nbsp;|&nbsp; "
-        f"Per year: {money(alt['cost'] * 365)} "
-        f"({rupees(alt['cost'] * 365)})", body))
+        f"<b>Per year:</b> {money(alt['cost'] * 365)} "
+        f"({rupees(alt['cost'] * 365)})"))
+
+    story.append(Spacer(1, 4))
 
     story.append(Paragraph(
         f"<b>Cost impact vs the current {now['calls']}-call/day cadence:</b> "
@@ -962,32 +1044,16 @@ def build(cadence, tokens, components, out_path, component_clock="06:45"):
         f"{(alt['thinking'] / 1e6 * rate_out + alt['image_input'] / 1e6 * rate_in) / alt['cost'] * 100:.0f}% "
         f"of the half-hourly bill.", note))
 
-    story.append(Paragraph(
-        f"<b><font color='#9A3412'>Bigger issue than cost: request "
-        f"count.</font></b> "
+    story.append(Spacer(1, 3))
+
+    story.append(callout(
+        f"<b>Bigger issue than cost: request count.</b> "
         f"{alt['calls']} calls/day for this plant alone is more than double "
         f"the free tier's cap of 20 requests per day per model &mdash; a cap "
         f"verified here directly, from quota-exhaustion errors hit during "
         f"this project's own backtesting, not from documentation. Across the "
         f"three plants the half-hourly cadence would be "
-        f"{alt['calls'] * 3} calls/day.", body))
-
-    story.append(Paragraph(
-        f"<b>And the accuracy case is unproven.</b> Consecutive half-hour "
-        f"calls largely re-forecast blocks the previous call already covered, "
-        f"and with a {settings['schedule_rules']['freeze_blocks']}-block "
-        f"freeze horizon the first "
-        f"{settings['schedule_rules']['freeze_blocks']} blocks of every new "
-        f"schedule are re-published unchanged in any case &mdash; so a "
-        f"half-hourly call can only change blocks from 90 minutes out. And "
-        f"more calls means the model's number is applied more often, which "
-        f"our own scoring says is the wrong direction: over 12 backtested "
-        f"days, priced as DSM penalty, the anchor alone cost Rs 17,411 and every "
-        f"increment of weight given to the model made it worse, monotonically, "
-        f"up to Rs 27,663 for the model alone "
-        f"(tests/sweep_blend_weight.py, docs/blend_weight_sweep.csv). There "
-        f"is no measurement "
-        f"here that a higher call rate would buy anything.", body))
+        f"{alt['calls'] * 3} calls/day.", warn=True))
 
     # ------------------------------------------------------------------
     # 5a. model comparison, half-hourly
@@ -1135,8 +1201,7 @@ def model_table(workload, table, cell):
     )
 
     return table(rows, widths, spans=[
-        ("BACKGROUND", (0, current_row), (-1, current_row),
-         colors.HexColor("#FFE8D6")),
+        ("BACKGROUND", (0, current_row), (-1, current_row), HILITE),
         ("FONTNAME", (0, current_row), (-1, current_row), "Helvetica-Bold"),
     ])
 
