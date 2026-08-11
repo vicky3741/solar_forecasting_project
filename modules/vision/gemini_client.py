@@ -71,6 +71,12 @@ class GeminiClient:
         # refusal.
         self.exhausted = set()
 
+        # Which model actually answered the last call. The fallback chain
+        # means the model that serves a request is often not the one that
+        # was asked for, and without recording it a run's cost and a run's
+        # results get attributed to the wrong model.
+        self.last_model_used = None
+
         self.logger = get_logger()
 
         retry = settings["vision"].get("retry", {})
@@ -250,6 +256,8 @@ class GeminiClient:
                     contents=contents,
                     config=config
                 )
+
+                self.last_model_used = model
 
                 if model != self.model:
                     self.logger.info(f"Vision served by fallback {model}")

@@ -125,6 +125,15 @@ def new_day(day, folder):
         "new_scheduled_mw": list(values.values()),
     }).sort_values("timestamp")
 
+    # The anchor stitched the same way. Damped persistence off the meter
+    # and a clock - no AI, no Windy, no weather. It is the "what if we
+    # had not bothered" column, and without it a comparison between two
+    # clever pipelines cannot say whether either is earning its keep.
+    anchor = stitch_day(paths, column="anchor_mw")
+
+    if anchor:
+        frame["anchor_mw"] = frame["timestamp"].map(anchor)
+
     # Match the workbook on block number, which is how the old side is
     # indexed. Block 1 is the 00:00-00:15 window.
     frame["block"] = [
@@ -195,8 +204,13 @@ def compare_day(day, meter, folder):
     if actual.empty:
         return None, f"no meter data for {day}"
 
+    new_columns = ["block", "new_scheduled_mw"]
+
+    if "anchor_mw" in new.columns:
+        new_columns.append("anchor_mw")
+
     merged = (
-        old.merge(new[["block", "new_scheduled_mw"]], on="block", how="inner")
+        old.merge(new[new_columns], on="block", how="inner")
            .merge(actual, on="block", how="inner")
     )
 
@@ -226,6 +240,11 @@ def compare_day(day, meter, folder):
         "workbook": old_path.name,
         "frame": merged,
     }
+
+    if "anchor_mw" in merged.columns and merged["anchor_mw"].notna().any():
+        anchored = merged.dropna(subset=["anchor_mw"])
+        if not anchored.empty:
+            result["anchor"] = score(anchored, "anchor_mw")
 
     if "enercast_mw" in merged.columns:
         reference = merged.dropna(subset=["enercast_mw"])
@@ -287,17 +306,23 @@ def main():
 
     print("\n" + "-" * 78)
     print(f"{'day':<12} {'blk':>4} {'OLD Rs':>10} {'NEW Rs':>10} "
-          f"{'OLD dev%':>9} {'NEW dev%':>9} {'OLD band':>9} {'NEW band':>9}")
+          f"{'ANCHOR Rs':>11} {'OLD dev%':>9} {'NEW dev%':>9} {'NEW band':>9}")
     print("-" * 78)
 
     for result in results:
 
         old, new = result["old"], result["new"]
 
+        anchor = result.get("anchor")
+        anchor_text = (
+            f"{anchor['penalty_rs']:>11.2f}" if anchor else f"{'-':>11}"
+        )
+
         print(f"{str(result['day']):<12} {result['blocks']:>4} "
               f"{old['penalty_rs']:>10.2f} {new['penalty_rs']:>10.2f} "
+              f"{anchor_text} "
               f"{old['deviation_pct']:>8.2f}% {new['deviation_pct']:>8.2f}% "
-              f"{old['in_band_pct']:>8.1f}% {new['in_band_pct']:>8.1f}%")
+              f"{new['in_band_pct']:>8.1f}%")
 
     print("-" * 78)
 
@@ -311,9 +336,18 @@ def main():
     old_band = float(np.mean([r["old"]["in_band_pct"] for r in results]))
     new_band = float(np.mean([r["new"]["in_band_pct"] for r in results]))
 
+    anchor_days = [r["anchor"] for r in results if "anchor" in r]
+    anchor_total = sum(a["penalty_rs"] for a in anchor_days)
+
+    anchor_text = (
+        f"{anchor_total:>11.2f}"
+        if len(anchor_days) == len(results) else f"{'-':>11}"
+    )
+
     print(f"{'TOTAL':<12} {blocks:>4} {old_total:>10.2f} {new_total:>10.2f} "
-          f"{old_dev:>8.2f}% {new_dev:>8.2f}% "
-          f"{old_band:>8.1f}% {new_band:>8.1f}%")
+          f"{anchor_text} "
+          f"{old_dev:>8.2f}% {new_dev:>8.2f}% {new_band:>8.1f}%")
+    print(f"{'(old band':<12} {'':>4} {old_band:>9.1f}%)")
 
     print("\n" + "=" * 78)
 
@@ -331,6 +365,18 @@ def main():
     )
 
     print(f"Days the new pipeline was cheaper: {wins} of {len(results)}.")
+
+    if len(anchor_days) == len(results):
+
+        print(f"\nAnchor only - damped persistence off the meter, no AI, no "
+              f"Windy, no weather:\n  Rs {anchor_total:,.2f}. "
+              f"The new pipeline is "
+              f"Rs {abs(new_total - anchor_total):,.2f} "
+              f"{'CHEAPER' if new_total < anchor_total else 'MORE EXPENSIVE'} "
+              f"than doing nothing clever;\n  the old pipeline is "
+              f"Rs {abs(old_total - anchor_total):,.2f} "
+              f"{'CHEAPER' if old_total < anchor_total else 'MORE EXPENSIVE'}"
+              f" than it.")
 
     if "enercast" in results[0]:
         reference = sum(

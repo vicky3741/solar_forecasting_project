@@ -927,7 +927,11 @@ RESPOND WITH JSON ONLY, no prose outside it, in exactly this form:
 
         meta["images_attached"] = [Path(p).name for p in images]
 
-        response = self.client().generate_text(
+        # Held in a local so the model that actually served the call can
+        # be read back off it afterwards.
+        client = self.client()
+
+        response = client.generate_text(
             prompt,
             temperature=self.temperature,
             max_output_tokens=self.max_output_tokens,
@@ -1030,7 +1034,16 @@ RESPOND WITH JSON ONLY, no prose outside it, in exactly this form:
             "frozen_blocks": len(frozen),
             "adjusted_blocks": int(schedule["was_adjusted"].sum()),
             "validator_notes": validator_notes,
-            "model": settings["vision"]["model"],
+
+            # This used to record settings["vision"]["model"] - the VISION
+            # model, which is not the one this call uses and not
+            # necessarily the one that served it either. Two separate
+            # facts are needed and both are now kept: what was asked for,
+            # and what answered. When the free-tier quota runs out
+            # mid-sweep the chain silently falls back, and a cost report
+            # that trusts the requested model prices the wrong thing.
+            "model_requested": self.model,
+            "model_served": getattr(client, "last_model_used", None),
         })
 
         return schedule, meta
