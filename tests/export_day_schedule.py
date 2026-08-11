@@ -14,6 +14,19 @@ so this is what the grid operator would actually have been
 holding at the end of the day, not any single run's forecast.
 
 Run:  python -m tests.export_day_schedule --day 2026-08-10
+
+To put this pipeline's day through the SAME DSM penalty report the old
+pipeline's day goes through - same slabs, same moving penalty band, same
+three charts - write the schedule in that report's own input layout and
+point the report at it:
+
+  python -m tests.export_day_schedule --day 2026-08-10 \
+      --schedule-csv <main worktree>/outputs/schedules/day_schedule_2026-08-10.csv
+  python -m tests.build_penalty_report 2026-08-10 --tag NewPipeline
+  python -m tests.recalc outputs/reports/Schedule_vs_Meter_Penalty_2026-08-10_NewPipeline.xlsx
+
+The --tag keeps the two pipelines' reports for one day from overwriting
+each other, and labels the sheet so they cannot be mixed up.
 =========================================================
 """
 
@@ -27,7 +40,7 @@ from config.config import settings
 from modules.preprocessing.windy_features import load_meter_history
 from modules.scheduling.effective_time import block_number
 from tests.score_day_schedules import (
-    FREEZE_BLOCKS, dsm_penalty, run_time_of, stitch_day
+    FREEZE_BLOCKS, dsm_penalty, run_time_of, stitch_day, stitch_day_with_runs
 )
 
 
@@ -48,6 +61,13 @@ def main():
         ),
     )
     parser.add_argument("--out", default=None)
+    parser.add_argument(
+        "--schedule-csv", dest="schedule_csv", default=None,
+        help="also write the stitched schedule in the day_schedule_<day>.csv "
+             "layout tests/build_penalty_report.py reads, so this pipeline's "
+             "day can be put through the same DSM penalty report, penalty "
+             "bands and charts the old pipeline's day goes through",
+    )
 
     args = parser.parse_args()
 
@@ -61,7 +81,8 @@ def main():
     if not paths:
         raise SystemExit(f"No saved schedules for {day} in {args.folder}")
 
-    model = stitch_day(paths, "forecast_mw")
+    written_by = stitch_day_with_runs(paths, "forecast_mw")
+    model = {timestamp: value for timestamp, (value, _) in written_by.items()}
     anchor = stitch_day(paths, "anchor_mw")
 
     frame = pd.DataFrame({
@@ -110,6 +131,27 @@ def main():
 
     out.parent.mkdir(parents=True, exist_ok=True)
     frame.to_csv(out, index=False)
+
+    if args.schedule_csv:
+
+        # The penalty report merges on a NAIVE local timestamp, which is
+        # what the meter preprocessor produces; handing it a tz-aware one
+        # silently matches nothing and every block loses its actual.
+        schedule = pd.DataFrame({
+            "block": [block_number(t) for t in sorted(model)],
+            "block_time": [t.strftime("%H:%M") for t in sorted(model)],
+            "timestamp": [t.tz_localize(None) for t in sorted(model)],
+            "scheduled_at": [written_by[t][1] for t in sorted(model)],
+            "scheduled_mw": [round(model[t], 4) for t in sorted(model)],
+            "anchor_mw": [round(anchor[t], 4) if t in anchor else None
+                          for t in sorted(model)],
+        })
+
+        schedule_path = Path(args.schedule_csv)
+        schedule_path.parent.mkdir(parents=True, exist_ok=True)
+        schedule.to_csv(schedule_path, index=False)
+
+        print(f"\nSchedule for the penalty report: {schedule_path}")
 
     scored = frame.dropna(subset=["actual_mw"])
 

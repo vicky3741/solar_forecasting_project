@@ -137,15 +137,21 @@ def run_time_of(path):
     return pd.Timestamp(f"{date} {hour}:{minute}", tz=TIMEZONE)
 
 
-def stitch_day(paths, column="forecast_mw"):
+def stitch_day_with_runs(paths, column="forecast_mw"):
     """
-    One day's runs -> {timestamp: value}, applying the freeze horizon.
+    One day's runs -> {timestamp: (value, "HH:MM" of the run that wrote it)},
+    applying the freeze horizon.
 
     Runs are applied oldest first. Each writes only from its EFFECTIVE
     START block onward - engine block plus the freeze horizon - so the
     blocks it was not allowed to touch keep whatever the earlier run
     put there. The first run of the day has nothing to freeze and
     writes from its own engine block.
+
+    The run label is what the penalty report shows as "Scheduled at": it
+    is the whole point of the freeze horizon that a block's value belongs
+    to an earlier run than the one nearest it, so the report has to be
+    able to say which.
     """
 
     day = {}
@@ -170,9 +176,20 @@ def stitch_day(paths, column="forecast_mw"):
         for _, row in frame.iterrows():
 
             if block_number(row["timestamp"]) >= effective:
-                day[row["timestamp"]] = float(row[column])
+                day[row["timestamp"]] = (
+                    float(row[column]), f"{run_time:%H:%M}"
+                )
 
     return day
+
+
+def stitch_day(paths, column="forecast_mw"):
+    """One day's runs -> {timestamp: value}, under the freeze horizon."""
+
+    return {
+        timestamp: value
+        for timestamp, (value, _) in stitch_day_with_runs(paths, column).items()
+    }
 
 
 def score_day(day_values, meter):
