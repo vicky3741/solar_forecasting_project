@@ -105,28 +105,77 @@ def main():
         help="which scheduling time to break down (default 06:45, the "
              "longest prompt of the day)"
     )
+    parser.add_argument(
+        "--build", default=None, metavar="YYYY-MM-DD",
+        help="build a FRESH prompt for this day instead of reading a saved "
+             "one. Saved prompts accumulate over months and some were "
+             "written before the current prompt format existed; --build "
+             "measures the prompt the pipeline would send today. Uses "
+             "dry_run, so it spends no generation quota."
+    )
+    parser.add_argument(
+        "--prompt-file", default=None,
+        help="split THIS prompt file. Use it to break down one of the "
+             "prompts tests/measure_halfhourly_cost.py cached and counted, "
+             "so the component table describes exactly the prompt whose "
+             "total appears in the cost report."
+    )
+    parser.add_argument("--out", default="outputs/reports/prompt_components.csv")
 
     args = parser.parse_args()
 
-    pattern = re.compile(
-        r"\d{4}-\d{2}-\d{2}_" + args.run_time.replace(":", "-") + r"_prompt\.txt$"
-    )
+    if args.prompt_file:
 
-    paths = [
-        p for p in sorted(Path(args.folder).glob("*_prompt.txt"))
-        if pattern.search(p.name)
-    ]
+        path = Path(args.prompt_file)
+        text = path.read_text(encoding="utf-8")
 
-    if not paths:
-        raise SystemExit(
-            f"No saved prompt for {args.run_time} in {args.folder}"
+    elif args.build:
+
+        from modules.fusion.llm_scheduler import LLMScheduler
+        from modules.preprocessing.windy_features import (
+            WindyFeatureBuilder, load_meter_history
         )
 
-    # The longest example at this time, so the breakdown reflects the
-    # worst case rather than a quiet day.
-    path = max(paths, key=lambda p: p.stat().st_size)
+        hour, minute = map(int, args.run_time.split(":"))
 
-    text = path.read_text(encoding="utf-8")
+        run_time = pd.Timestamp(
+            f"{args.build} {hour:02d}:{minute:02d}",
+            tz=settings["plant"]["timezone"],
+        )
+
+        features, info = WindyFeatureBuilder().build(
+            run_time=run_time, meter=load_meter_history()
+        )
+
+        _, meta = LLMScheduler().decide(
+            features, run_time, dry_run=True, satellite=info["satellite"]
+        )
+
+        text = meta["prompt"]
+        path = Path(f"(built fresh for {args.build} {args.run_time})")
+
+    else:
+
+        pattern = re.compile(
+            r"\d{4}-\d{2}-\d{2}_" + args.run_time.replace(":", "-")
+            + r"_prompt\.txt$"
+        )
+
+        paths = [
+            p for p in sorted(Path(args.folder).glob("*_prompt.txt"))
+            if pattern.search(p.name)
+        ]
+
+        if not paths:
+            raise SystemExit(
+                f"No saved prompt for {args.run_time} in {args.folder}"
+            )
+
+        # The longest example at this time, so the breakdown reflects the
+        # worst case rather than a quiet day.
+        path = max(paths, key=lambda p: p.stat().st_size)
+
+        text = path.read_text(encoding="utf-8")
 
     from modules.vision.gemini_client import GeminiClient
 
@@ -167,7 +216,9 @@ def main():
     counted = int(frame["tokens"].sum())
 
     print("=" * 78)
-    print(f"PROMPT COMPONENT BREAKDOWN  —  {args.run_time} run")
+    label = path.stem if args.prompt_file else f"{args.run_time} run"
+
+    print(f"PROMPT COMPONENT BREAKDOWN  —  {label}")
     print(f"  {path.name}")
     print(f"  model: {model}")
     print("=" * 78)
@@ -215,7 +266,7 @@ def main():
             print("Trimming text saves tokens; dropping one image saves more")
             print(f"than the {frame.iloc[0]['component'].lower()} entirely.")
 
-    output = Path("outputs/reports/prompt_components.csv")
+    output = Path(args.out)
     output.parent.mkdir(parents=True, exist_ok=True)
     frame.to_csv(output, index=False)
 
