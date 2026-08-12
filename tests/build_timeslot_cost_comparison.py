@@ -103,6 +103,11 @@ PRICING = [
 
 CURRENT_MODEL = "gemini-3.6-flash"
 
+# Verified from quota-exhaustion errors hit during this project's own
+# backtesting, not from documentation. Per model, not per key, which is
+# what let an 83-call backtest finish in one day on one key.
+FREE_TIER_REQUESTS_PER_DAY = 20
+
 # Live ECB reference rate, fetched 2026-08-10 from
 # api.frankfurter.dev/v1/latest?from=USD&to=INR, quoted for 2026-08-07 -
 # the same rate the earlier token cost report used, kept so the two of
@@ -345,7 +350,8 @@ def cost_of(input_tokens, output_tokens, rate_in, rate_out):
 
 # ----------------------------------------------------------------------
 
-def build(cadence, tokens, components, out_path, component_clock="06:45"):
+def build(cadence, tokens, components, out_path, component_clock="06:45",
+          alt_times=None, alt_label=None):
 
     plant = settings["plant"]
 
@@ -392,8 +398,23 @@ def build(cadence, tokens, components, out_path, component_clock="06:45"):
         blocks, [row["thinking"] for row in current]
     )
 
-    # ---------- half-hourly cadence ----------
-    half_times = [c for c in cadence["run_times"] if c not in production_times]
+    # ---------- the alternative cadence ----------
+    # Explicit, not derived. An earlier version took "every measured
+    # time that is not a production time", which silently breaks for any
+    # cadence that CONTAINS the production times - and the 45-minute
+    # grid does exactly that, since 06:45, 08:15 ... 15:45 all sit on it.
+    half_times = alt_times or [
+        c for c in cadence["run_times"] if c not in production_times
+    ]
+
+    missing = [c for c in half_times if c not in measured]
+
+    if missing:
+        raise SystemExit(
+            "No measurement for " + ", ".join(missing) + ".\nRun:\n"
+            "  python -m tests.measure_halfhourly_cost --clocks "
+            + ",".join(half_times)
+        )
 
     half = []
 
@@ -934,20 +955,52 @@ def build(cadence, tokens, components, out_path, component_clock="06:45"):
     # ------------------------------------------------------------------
     first, last = half[0]["clock"], half[-1]["clock"]
 
+    # Spacing read off the measured times rather than named in prose, so
+    # the sentence cannot drift from the grid actually priced below.
+    def minutes(clock):
+        hour, minute = clock.split(":")
+        return int(hour) * 60 + int(minute)
+
+    gaps = {
+        minutes(b["clock"]) - minutes(a["clock"])
+        for a, b in zip(half, half[1:])
+    }
+
+    spacing = (
+        f"every {gaps.pop()} minutes" if len(gaps) == 1
+        else "at the times listed"
+    )
+
+    label = alt_label or "Half-Hourly"
+
+    # The production times that this cadence also covers. On the
+    # 45-minute grid that is all seven of them, which is the honest
+    # framing: this is the current schedule with extra runs between,
+    # not a different schedule.
+    shared = [c for c in half_times if c in production_times]
+
     story.append(Paragraph(
-        f"5. Alternative Cadence &mdash; Half-Hourly Schedule Generation "
+        f"5. Alternative Cadence &mdash; {label} Schedule Generation "
         f"({first}&ndash;{last}, each call to 18:45)", h2))
 
     story.append(Paragraph(
-        f"A NEW schedule generated every 30 minutes from {first} through "
+        f"A NEW schedule generated {spacing} from {first} through "
         f"{last} &mdash; each call still forecasting every remaining block to "
         f"18:45, just starting more often. That is <b>{alt['calls']} calls a "
-        f"day instead of {now['calls']}</b>.", body))
+        f"day instead of {now['calls']}</b>."
+        + (
+            f" This grid <b>contains all {len(shared)} of the current "
+            f"scheduling times</b> ({', '.join(shared)}), so it is today's "
+            f"schedule with {alt['calls'] - len(shared)} extra runs "
+            f"interleaved rather than a different schedule."
+            if len(shared) == now["calls"] else ""
+        ),
+        body))
 
     story.append(Paragraph(
         f"<b>These input figures are measured, not interpolated.</b> The "
         f"prompt builder has a dry-run mode, so all {alt['calls']} "
-        f"half-hourly prompts were built for real on the same "
+        f"prompts were built for real on the same "
         f"{len(cadence['days'])} days and counted with countTokens &mdash; "
         f"which spends no generation quota. What could NOT be measured is "
         f"output: {alt['calls']} real calls a day is above the free tier's "
@@ -1039,31 +1092,56 @@ def build(cadence, tokens, components, out_path, component_clock="06:45"):
         f"{alt['blocks'] / now['blocks']:.1f}&times; the work, but cost "
         f"{alt['cost'] / now['cost']:.1f}&times; as much. The reason is in "
         f"Section 3: thinking tokens and the two screenshots are charged per "
-        f"call and barely move with the size of the request, so tripling the "
-        f"call count roughly triples them. Together they are "
+        f"call and barely move with the size of the request, so multiplying "
+        f"the call count multiplies them. Together they are "
         f"{(alt['thinking'] / 1e6 * rate_out + alt['image_input'] / 1e6 * rate_in) / alt['cost'] * 100:.0f}% "
-        f"of the half-hourly bill.", note))
+        f"of this cadence's bill.", note))
 
     story.append(Spacer(1, 3))
 
+    # The free tier caps REQUESTS, and whether this cadence breaches it
+    # depends on the call count, so the sentence is built from the count
+    # rather than asserted. At 22 calls it breaches for one plant; at 17
+    # it does not, and saying otherwise would be wrong by inspection.
+    over_single = alt["calls"] > FREE_TIER_REQUESTS_PER_DAY
+    over_fleet = alt["calls"] * 3 > FREE_TIER_REQUESTS_PER_DAY
+
+    if over_single:
+        verdict = (
+            f"{alt['calls']} calls/day for this plant alone already exceeds "
+            f"the free tier's cap of {FREE_TIER_REQUESTS_PER_DAY} requests "
+            f"per day per model"
+        )
+    else:
+        verdict = (
+            f"{alt['calls']} calls/day fits under the free tier's cap of "
+            f"{FREE_TIER_REQUESTS_PER_DAY} requests per day per model for "
+            f"<b>one</b> plant, with {FREE_TIER_REQUESTS_PER_DAY - alt['calls']} "
+            f"requests to spare &mdash; but only one"
+        )
+
+    fleet_verdict = (
+        "still over the cap, so the fleet needs a key per plant or a paid "
+        "tier" if over_fleet else
+        "within the cap, so a key per plant would carry it"
+    )
+
     story.append(callout(
-        f"<b>Bigger issue than cost: request count.</b> "
-        f"{alt['calls']} calls/day for this plant alone is more than double "
-        f"the free tier's cap of 20 requests per day per model &mdash; a cap "
+        f"<b>Request count, not just cost.</b> {verdict} &mdash; a cap "
         f"verified here directly, from quota-exhaustion errors hit during "
         f"this project's own backtesting, not from documentation. Across the "
-        f"three plants the half-hourly cadence would be "
-        f"{alt['calls'] * 3} calls/day.", warn=True))
+        f"three plants this cadence is <b>{alt['calls'] * 3} calls/day</b>, "
+        f"{fleet_verdict}.", warn=True))
 
     # ------------------------------------------------------------------
     # 5a. model comparison, half-hourly
     # ------------------------------------------------------------------
     story.append(Paragraph(
-        f"5a. LLM Model Comparison &mdash; Half-Hourly "
+        f"5a. LLM Model Comparison &mdash; {label} "
         f"({alt['calls']}-Call/Day) Workload", h2))
 
     story.append(Paragraph(
-        f"The same published rates applied to the half-hourly volume: "
+        f"The same published rates applied to that volume: "
         f"<b>{alt['input']:,.0f} input + {alt['output']:,.0f} output tokens "
         f"per day</b>.", body))
 
@@ -1218,6 +1296,17 @@ def main():
         "--component-run-time", default="06:45",
         help="which scheduling time the component CSV was measured on"
     )
+    parser.add_argument(
+        "--alt-times", default=None,
+        help="comma-separated scheduling times for the alternative cadence "
+             "in Section 5. Default: every measured time that is not a "
+             "production time, which is the half-hourly grid. Give this "
+             "explicitly for any cadence that CONTAINS the production times."
+    )
+    parser.add_argument(
+        "--alt-label", default=None,
+        help='name for that cadence in the heading, e.g. "45-Minute"'
+    )
     parser.add_argument("--out", default=None)
 
     args = parser.parse_args()
@@ -1242,7 +1331,12 @@ def main():
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     summary = build(
-        cadence, tokens, components, out_path, args.component_run_time
+        cadence, tokens, components, out_path, args.component_run_time,
+        alt_times=(
+            [c.strip() for c in args.alt_times.split(",")]
+            if args.alt_times else None
+        ),
+        alt_label=args.alt_label,
     )
 
     now, alt = summary["current"], summary["half"]
