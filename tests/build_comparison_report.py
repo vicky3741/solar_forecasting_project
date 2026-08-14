@@ -38,6 +38,7 @@ from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
 from config.config import settings
+from modules.evaluation import dsm_penalty
 
 def parse_args():
     """
@@ -72,7 +73,7 @@ OURS_PATH = Path(ARGS.ours_xlsx) if ARGS.ours_xlsx else (
 
 CAPACITY_MW = settings["plant"]["capacity_mw"]
 PLANT = settings["plant"]["name"]
-BLOCK_ENERGY_FACTOR = 250
+BLOCK_ENERGY_FACTOR = dsm_penalty.BLOCK_ENERGY_FACTOR
 
 FONT = "Arial"
 DARK_GREEN = "1B4332"
@@ -81,11 +82,21 @@ RED_FILL = "FCE4E4"
 BLUE = "1F4E9C"
 PURPLE = "6A3D9A"
 
+# The mentor's band table, from config (dsm.bands) via the penalty
+# module. Two pipelines' reports and this comparison must price a block
+# identically or the comparison means nothing.
+def whole(value):
+    """10.0 -> 10, so the sheet's band table reads 10 / 15 / 20 as before."""
+
+    if value is None:
+        return None
+
+    return int(value) if float(value).is_integer() else value
+
+
 SLABS = [
-    ("Slab 1", 0, 10, 0),
-    ("Slab 2", 10, 15, 0.5),
-    ("Slab 3", 15, 20, 0.75),
-    ("Slab 4", 20, None, 1),
+    (f"Slab {i}", whole(low), whole(high), whole(rate))
+    for i, (low, high, rate) in enumerate(dsm_penalty.BANDS, start=1)
 ]
 
 
@@ -267,6 +278,13 @@ def main():
         ws.cell(row=r, column=4, value=rate).font = f_input
         if to is not None:
             ws.cell(row=r, column=5, value=f"={cap_cell}*{to}/100").number_format = "0.000"
+
+    # Four-band formula, same guard as build_penalty_report.py.
+    if len(SLABS) != 4:
+        raise ValueError(
+            f"dsm.bands has {len(SLABS)} bands; this sheet's penalty formula "
+            "is written for 4."
+        )
 
     slab1_edge = f"E{slab_rows['Slab 1']}"
     slab2_edge = f"E{slab_rows['Slab 2']}"

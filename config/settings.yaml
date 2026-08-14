@@ -85,6 +85,39 @@ schedule_rules:
   # comparable to anything measured after it.
   freeze_blocks: 6
 
+# DSM penalty - the mentor's "SIRMOUR Penalty Logic", 2026-08-14.
+# One place, read by modules/evaluation/dsm_penalty.py, which is what
+# every report, experiment and pipeline prices blocks with. The old
+# pipeline carries the identical block on its own branch, so the two
+# pipelines cannot be compared on different money.
+dsm:
+  # STANDARD DSM settlement: the deviation is charged by size, so
+  # under-generation and over-generation cost the same. The OSEPL
+  # payable/receivable settlement is a DIFFERENT rule and is not
+  # implemented - this key exists so a plant that needs it is visible
+  # rather than silently priced with Sirmour's rule.
+  settlement: standard
+
+  # Madhya Pradesh Solar band table: [from %, to % (null = no ceiling),
+  # Rs per kWh]. Percentages are of INSTALLED CAPACITY, not of the
+  # scheduled value - a near-zero dawn block would otherwise be
+  # infinitely deviant. Each band charges its own slice of the deviation.
+  #
+  # The Telangana plants inherit this table. The mentor has only
+  # confirmed the Madhya Pradesh Solar one; if their regulator's slabs
+  # differ, override `bands` in config/plants/<key>.yaml - every script
+  # reads it from here, so that one edit reprices everything.
+  bands:
+    - [0, 10, 0]
+    - [10, 15, 0.5]
+    - [15, 20, 0.75]
+    - [20, null, 1.0]
+
+  # DISPLAY ONLY - what the scheduled energy earns, shown next to the
+  # penalty so a rupee cost can be read against the block's own value.
+  # It is never part of the penalty calculation.
+  ppa_rate_rs_per_kwh: 2.94
+
 # Enercast is a reference schedule shown side by side, never a training
 # input (mentor brief). Only Sirmour has an Enercast feed.
 enercast:

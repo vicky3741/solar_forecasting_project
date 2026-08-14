@@ -12,6 +12,8 @@ penalty).
 
 import numpy as np
 
+from modules.evaluation import dsm_penalty
+
 
 def mean_absolute_error(forecast, actual):
 
@@ -58,27 +60,38 @@ def average_percentage_deviation(forecast, actual, capacity_kw):
 
 # --------------------------------------------------
 
-def scheduling_penalty(forecast,
-                       actual,
-                       capacity_kw,
-                       free_band_pct=15,
-                       penalty_rate_per_pct=1.0):
+def scheduling_penalty(forecast, actual, capacity_kw):
     """
-    PLACEHOLDER - NOT the real grid scheduling regulation.
+    The day's DSM penalty for these blocks, IN RUPEES.
 
-    Real intraday scheduling penalties (e.g. India's DSM
-    regulations) use specific deviation slabs and rupee-per-MWh
-    rates set by the regulator, which are not available here.
-    This is a simple stand-in so the pipeline has a working
-    penalty signal end-to-end: no penalty within `free_band_pct`
-    deviation, then a flat rate per percentage point beyond it.
+    REPLACED 2026-08-14. This used to be a placeholder - a 15%
+    free band and a flat "rate per percentage point", returning
+    a unitless score - written before the regulator's slabs
+    were known. Every other penalty figure this project quotes
+    (the penalty report, every experiment, this pipeline's
+    scorer in tests/score_day_schedules.py) already used the
+    real slabs, so this function was the one number in the
+    codebase that disagreed with the rest, and it is the number
+    the run report and the backtest CSV print. That is the
+    likeliest source of the mentor's "your Enercast penalty not
+    matching with actual penalty": the same Enercast schedule
+    priced here and priced in the penalty report came out
+    different, because the free band was 15% instead of 10% and
+    the answer was not in rupees.
 
-    Replace `free_band_pct` / `penalty_rate_per_pct` with the
-    actual regulation's slabs once available.
+    It now delegates to modules/evaluation/dsm_penalty.py, the
+    single implementation of the mentor's SIRMOUR penalty
+    logic. Figures printed by this function BEFORE 2026-08-14
+    are on the old placeholder basis and are not comparable.
     """
 
-    deviation_pct = percentage_deviation(forecast, actual, capacity_kw)
+    forecast = np.asarray(forecast, dtype=float)
+    actual = np.asarray(actual, dtype=float)
 
-    excess = np.clip(deviation_pct - free_band_pct, 0, None)
+    # DSM signs the deviation as actual - scheduled; only its size is
+    # charged, so this matches the report's column either way.
+    deviation_mw = (actual - forecast) / 1000.0
 
-    return float(np.sum(excess * penalty_rate_per_pct))
+    return float(np.sum(dsm_penalty.penalty_rs(
+        deviation_mw, capacity_mw=capacity_kw / 1000.0
+    )))

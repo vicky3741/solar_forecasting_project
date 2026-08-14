@@ -48,6 +48,7 @@ from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
 from config.config import settings
+from modules.evaluation import dsm_penalty
 from modules.evaluation.evaluator import Evaluator
 from modules.preprocessing.preprocess import DataPreprocessor
 from utils.file_manager import find_daily_file
@@ -88,7 +89,11 @@ OUT_DIR = Path(settings["outputs"]["reports"])
 
 CAPACITY_MW = settings["plant"]["capacity_mw"]
 PLANT = settings["plant"]["name"]
-BLOCK_ENERGY_FACTOR = 250   # 0.25 h x 1000 kW/MW - MW deviation -> kWh for one block
+
+# 0.25 h x 1000 kW/MW - MW deviation -> kWh for one block. From the
+# penalty module so the sheet's parameter cells and every script that
+# prices a block can only ever move together.
+BLOCK_ENERGY_FACTOR = dsm_penalty.BLOCK_ENERGY_FACTOR
 
 FONT = "Arial"
 DARK_GREEN = "1B4332"
@@ -97,12 +102,22 @@ RED_FILL = "FCE4E4"
 BLUE = "1F4E9C"
 BLUE_FILL = "E4EDFA"
 
-# DSM slabs: (label, from_pct, to_pct_or_None, rate_rs_per_kwh)
+# DSM slabs: (label, from_pct, to_pct_or_None, rate_rs_per_kwh).
+# The numbers come from config (dsm.bands) via the penalty module - the
+# mentor's band table, in one place - and only the "Slab N" labels are
+# added here, because they are a layout detail of this sheet.
+def whole(value):
+    """10.0 -> 10, so the sheet's band table reads 10 / 15 / 20 as before."""
+
+    if value is None:
+        return None
+
+    return int(value) if float(value).is_integer() else value
+
+
 SLABS = [
-    ("Slab 1", 0, 10, 0),
-    ("Slab 2", 10, 15, 0.5),
-    ("Slab 3", 15, 20, 0.75),
-    ("Slab 4", 20, None, 1),
+    (f"Slab {i}", whole(low), whole(high), whole(rate))
+    for i, (low, high, rate) in enumerate(dsm_penalty.BANDS, start=1)
 ]
 
 
@@ -338,10 +353,10 @@ def main():
     last_row = start + len(rows) - 1
 
     # ---------------- DSM slab parameters (written below the summary) ----------------
-    # Each summary block (AI, and Enercast when present) is a fixed 12
+    # Each summary block (AI, and Enercast when present) is a fixed 15
     # metric rows starting 2 rows below the data; the slab table sits
     # below whichever summaries are present, with a 1-row gap.
-    SUMMARY_LEN = 12
+    SUMMARY_LEN = 15
     ai_summary_end = last_row + 2 + SUMMARY_LEN
     if has_enercast:
         ec_summary_end = ai_summary_end + 2 + SUMMARY_LEN
@@ -350,6 +365,7 @@ def main():
         param_row = ai_summary_end + 2
     cap_cell = f"C{param_row + 1}"
     factor_cell = f"C{param_row + 2}"
+    ppa_cell = f"C{param_row + 3}"
 
     ws.cell(row=param_row, column=1,
             value="DSM SLAB PARAMETERS (the penalty column references these cells)"
@@ -364,7 +380,16 @@ def main():
     c = ws.cell(row=param_row + 2, column=3, value=BLOCK_ENERGY_FACTOR)
     c.font = f_input
 
-    slab_head_row = param_row + 4
+    # DISPLAY ONLY. The PPA rate is what the scheduled energy earns; it is
+    # not part of the penalty. It sits here so the day's penalty can be
+    # read against the rupees the day's schedule was worth.
+    ws.cell(row=param_row + 3, column=1,
+            value="PPA rate (Rs/kWh) - value of scheduled energy, NOT part of the penalty"
+            ).font = f_label
+    c = ws.cell(row=param_row + 3, column=3, value=dsm_penalty.PPA_RATE)
+    c.font = f_input
+
+    slab_head_row = param_row + 5
     for i, h in enumerate(["Slab", "From %", "To %", "Rate (Rs/kWh)", "Upper edge (MW)"], start=1):
         cell = ws.cell(row=slab_head_row, column=i, value=h)
         cell.font = f_head
@@ -383,6 +408,17 @@ def main():
         if to is not None:
             edge_cell = ws.cell(row=r, column=5, value=f"={cap_cell}*{to}/100")
             edge_cell.number_format = "0.000"
+
+    # The live Excel formula below is written for the four-band Madhya
+    # Pradesh table. If a plant ever configures a different number of
+    # bands, this must be rewritten - stop here rather than emit a sheet
+    # that silently prices only the first four.
+    if len(SLABS) != 4:
+        raise ValueError(
+            f"dsm.bands has {len(SLABS)} bands; the sheet's penalty formula "
+            "is written for 4. Update penalty_formula() before changing the "
+            "band table."
+        )
 
     slab1_edge = f"E{slab_rows['Slab 1']}"
     slab2_edge = f"E{slab_rows['Slab 2']}"
@@ -433,10 +469,29 @@ def main():
     srow = last_row + 2
     ws.cell(row=srow, column=1, value="DAY SUMMARY - ACCURACY AND DSM PENALTY").font = f_section
 
+    b_rng = f"A{start}:A{last_row}"     # block numbers
     d_rng = f"D{start}:D{last_row}"
     c_rng = f"C{start}:C{last_row}"
     e_rng = f"E{start}:E{last_row}"
     g_rng = f"G{start}:G{last_row}"
+
+    def status_formula(penalty_range):
+        """
+        The mentor's four day statuses, as a live formula so the sheet
+        re-labels itself when a late meter file fills the missing blocks:
+
+            nothing priced           -> Pending
+            some blocks priced       -> Partially Calculated
+            all 96 priced, all free  -> Zero Penalty
+            all 96 priced, some cost -> Calculated
+        """
+
+        return (
+            f'=IF(COUNT({penalty_range})=0,"Pending",'
+            f'IF(COUNT({penalty_range})<{dsm_penalty.BLOCKS_PER_DAY},'
+            f'"Partially Calculated",'
+            f'IF(SUM({penalty_range})=0,"Zero Penalty","Calculated")))'
+        )
 
     summary = [
         ("Blocks with a real meter reading", f"=COUNT({d_rng})", "0"),
@@ -454,6 +509,18 @@ def main():
          f"=SUMPRODUCT(ABS({e_rng}))/COUNT({e_rng})/{cap_cell}*100", "0.00"),
         ("Blocks that incurred a penalty", f'=COUNTIF({g_rng},">0")', "0"),
         ("Worst single-block penalty (Rs)", f"=MAX({g_rng})", "0.00"),
+        # The mentor's daily logic names the worst block, not just its
+        # cost - it is the one line that says WHERE the money went.
+        ("Highest penalty block",
+         f'=IF(MAX({g_rng})=0,"-",INDEX({b_rng},MATCH(MAX({g_rng}),{g_rng},0)))',
+         "General"),
+        # His four day statuses. A block with no meter reading is Pending,
+        # never a penalty of zero, so a day is only "Calculated" once all
+        # 96 blocks of it are priced - a report covering just the
+        # scheduled window is honestly Partially Calculated.
+        ("Settlement status", status_formula(g_rng), "General"),
+        ("PPA value of scheduled energy (Rs) - reference, not a penalty",
+         f'=SUMIF({d_rng},"<>",{c_rng})*{factor_cell}*{ppa_cell}', "0.00"),
         ("TOTAL DSM PENALTY FOR THE DAY (Rs)", f"=SUM({g_rng})", "0.00"),
     ]
 
@@ -498,6 +565,15 @@ def main():
              f"=SUMPRODUCT(ABS({j_rng}))/COUNT({j_rng})/{cap_cell}*100", "0.00"),
             ("Blocks that incurred a penalty", f'=COUNTIF({l_rng},">0")', "0"),
             ("Worst single-block penalty (Rs)", f"=MAX({l_rng})", "0.00"),
+            # Same three lines as our own summary, on the same rule -
+            # this is the number the mentor said did not match, so it is
+            # priced and labelled identically to ours, block for block.
+            ("Highest penalty block",
+             f'=IF(MAX({l_rng})=0,"-",INDEX({b_rng},MATCH(MAX({l_rng}),{l_rng},0)))',
+             "General"),
+            ("Settlement status", status_formula(l_rng), "General"),
+            ("PPA value of scheduled energy (Rs) - reference, not a penalty",
+             f'=SUMIF({j_rng},"<>",{i_rng})*{factor_cell}*{ppa_cell}', "0.00"),
             ("TOTAL DSM PENALTY FOR THE DAY (Rs)", f"=SUM({l_rng})", "0.00"),
         ]
 

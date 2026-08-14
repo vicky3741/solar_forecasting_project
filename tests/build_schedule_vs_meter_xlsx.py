@@ -272,13 +272,22 @@ def build(day, folder, out_path):
 
     row += 1
 
+    def whole(value):
+        """10.0 -> 10, so the band table reads 10 / 15 / 20."""
+
+        if value is None:
+            return None
+
+        return int(value) if float(value).is_integer() else value
+
     for index, (low, high, rate) in enumerate(SLABS, start=1):
 
         edge = None if high is None else high / 100 * CAPACITY_MW
 
         for column, value in enumerate(
-            [f"Slab {index}", low, "above" if high is None else high,
-             rate, edge], start=1
+            [f"Slab {index}", whole(low),
+             "above" if high is None else whole(high),
+             whole(rate), edge], start=1
         ):
             cell = sheet.cell(row, column, value)
             cell.font = Font(name="Arial", size=10)

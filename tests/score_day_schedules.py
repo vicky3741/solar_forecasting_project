@@ -75,6 +75,9 @@ import numpy as np
 import pandas as pd
 
 from config.config import settings
+# Aliased: this module's own `dsm_penalty()` function is the name every
+# other script in this pipeline imports, and it must keep that name.
+from modules.evaluation import dsm_penalty as dsm_penalty_module
 from modules.preprocessing.windy_features import load_meter_history
 from modules.scheduling.effective_time import block_number
 
@@ -85,44 +88,31 @@ INTERVAL = settings["forecast"]["interval_minutes"]
 
 FREEZE_BLOCKS = settings.get("schedule_rules", {}).get("freeze_blocks", 0)
 
-BLOCK_ENERGY_FACTOR = 250   # 0.25 h x 1000 kW/MW: MW deviation -> kWh
+BLOCK_ENERGY_FACTOR = dsm_penalty_module.BLOCK_ENERGY_FACTOR  # MW dev -> kWh
 
-SLABS = [
-    (0, 10, 0.0),
-    (10, 15, 0.5),
-    (15, 20, 0.75),
-    (20, None, 1.0),
-]
+# The mentor's band table, from config (dsm.bands). Kept as a
+# module-level name because tests/build_schedule_vs_meter_xlsx.py imports
+# SLABS from here to print the slab table in its sheet.
+SLABS = dsm_penalty_module.BANDS
 
 _RUN_STAMP = re.compile(r"(\d{4}-\d{2}-\d{2})_(\d{2})-(\d{2})")
 
 
 def dsm_penalty(deviation_mw):
     """
-    Rupees for one block, by DSM slab. `deviation_mw` is
+    Rupees for one block, by DSM band. `deviation_mw` is
     (actual - scheduled); only its size matters, not its sign.
+
+    Every script in this pipeline prices a block through here, and since
+    2026-08-14 this is a one-line call into
+    modules/evaluation/dsm_penalty.py - the mentor's SIRMOUR penalty
+    logic, shared with the old pipeline's penalty report. The arithmetic
+    is unchanged (the same band-share-of-energy rule, checked against his
+    worked example in tests/test_dsm_penalty.py); what changed is that
+    the two pipelines can no longer drift apart on the band table.
     """
 
-    deviation_pct = abs(deviation_mw) / CAPACITY_MW * 100
-
-    rupees = 0.0
-
-    for low, high, rate in SLABS:
-
-        if rate == 0:
-            continue
-
-        upper = deviation_pct if high is None else min(deviation_pct, high)
-        band_pct = max(0.0, upper - low)
-
-        if band_pct <= 0:
-            continue
-
-        # The slab rate applies to the ENERGY in that band, not to the
-        # percentage: band % of capacity, converted to kWh for a block.
-        rupees += (band_pct / 100 * CAPACITY_MW) * BLOCK_ENERGY_FACTOR * rate
-
-    return rupees
+    return dsm_penalty_module.penalty_rs(deviation_mw)
 
 
 def run_time_of(path):

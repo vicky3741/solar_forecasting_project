@@ -33,6 +33,7 @@ import numpy as np
 import pandas as pd
 
 from config.config import settings
+from modules.evaluation import dsm_penalty
 from tests.test_adaptive_weather_weight_experiment import CAPACITY_KW, weights_constant
 
 CACHE = Path("outputs/weather_weight_runs.pkl")
@@ -42,25 +43,14 @@ SHIPPED = 0.65
 CURRENT = 0.25          # what's live in production right now
 
 CAPACITY_MW = settings["plant"]["capacity_mw"]
-BLOCK_ENERGY_FACTOR = 250      # 0.25 h x 1000 kW/MW
+BLOCK_ENERGY_FACTOR = dsm_penalty.BLOCK_ENERGY_FACTOR
 
-# Same DSM slabs used in every penalty report this project has built.
-EDGE1 = CAPACITY_MW * 0.10
-EDGE2 = CAPACITY_MW * 0.15
-EDGE3 = CAPACITY_MW * 0.20
-RATE2, RATE3, RATE4 = 0.5, 0.75, 1.0
-
-
-def dsm_penalty_rs(deviation_mw):
-    """Vectorized DSM slab penalty for an array of |deviation| in MW."""
-
-    dev = np.abs(deviation_mw)
-
-    slab2 = np.clip(np.minimum(dev, EDGE2) - EDGE1, 0, None) * RATE2
-    slab3 = np.clip(np.minimum(dev, EDGE3) - EDGE2, 0, None) * RATE3
-    slab4 = np.clip(dev - EDGE3, 0, None) * RATE4
-
-    return BLOCK_ENERGY_FACTOR * (slab2 + slab3 + slab4)
+# The DSM slabs, from modules/evaluation/dsm_penalty.py - the mentor's
+# band table, shared with the penalty report and every other experiment.
+# Kept as a module-level name here because
+# tests/test_cloud_structure_amplifier.py and
+# tests/test_penalty_drivers_analysis.py import it from this module.
+dsm_penalty_rs = dsm_penalty.penalty_rs
 
 
 def total_penalty_for(day_data, w, performance_ratio):

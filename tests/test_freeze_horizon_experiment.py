@@ -69,14 +69,11 @@ from pathlib import Path
 import pandas as pd
 
 from config.config import settings
+from modules.evaluation import dsm_penalty
 from utils.file_manager import reports_path
 
 
-BLOCK_ENERGY_FACTOR = 250   # 0.25 h x 1000 kW/MW - MW deviation -> kWh
-# DSM slabs, same as tests/build_penalty_report.py:
-# 0-10% of capacity is free, then 0.50 / 0.75 / 1.00 Rs per kWh.
-SLAB_EDGES_PCT = (10, 15, 20)
-SLAB_RATES = (0.5, 0.75, 1.0)
+BLOCK_ENERGY_FACTOR = dsm_penalty.BLOCK_ENERGY_FACTOR
 
 
 def parse_args():
@@ -96,16 +93,14 @@ def parse_args():
 
 
 def penalty_rs(error_mw, capacity_mw):
-    """Per-block DSM penalty in rupees."""
+    """
+    Per-block DSM penalty in rupees, from the mentor's band table.
 
-    deviation = abs(float(error_mw))
-    edges = [capacity_mw * pct / 100 for pct in SLAB_EDGES_PCT]
+    This arm's capacity is passed explicitly because the experiment can
+    be run for any plant.
+    """
 
-    return BLOCK_ENERGY_FACTOR * (
-        max(0.0, min(deviation, edges[1]) - edges[0]) * SLAB_RATES[0]
-        + max(0.0, min(deviation, edges[2]) - edges[1]) * SLAB_RATES[1]
-        + max(0.0, deviation - edges[2]) * SLAB_RATES[2]
-    )
+    return dsm_penalty.penalty_rs(error_mw, capacity_mw=capacity_mw)
 
 
 def build_arm(freeze, out_dir, days):
