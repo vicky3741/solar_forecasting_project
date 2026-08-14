@@ -177,6 +177,24 @@ def load_schedule_from_xlsx(path, day):
     return pd.DataFrame(records)
 
 
+def stop_overlaying_the_plot(chart):
+    """
+    openpyxl writes <c:overlay val="1"/> on every axis title and on the
+    legend, which tells Excel to draw them ON TOP of the plot area rather
+    than reserving room for them. The visible result is the y-axis title
+    printed straight through a tick label ("% of capacity" over "-10.0")
+    and the legend sitting on the series. Nothing on these charts is meant
+    to float over anything, so turn it off wherever it was set.
+    """
+
+    for axis in (chart.x_axis, chart.y_axis):
+        if axis.title is not None:
+            axis.title.overlay = False
+
+    if chart.legend is not None:
+        chart.legend.overlay = False
+
+
 def build_rows(day, schedule_xlsx=None):
     """
     Every block from the day's earliest meter reading to the last
@@ -675,6 +693,7 @@ def main():
     band.legend.legendEntry = [LegendEntry(idx=0, delete=True)]
 
     band += line
+    stop_overlaying_the_plot(band)
     ws.add_chart(band, f"{chart_col}3")
 
     bar = BarChart()
@@ -709,6 +728,7 @@ def main():
     bar.y_axis.delete = False
     bar.x_axis.tickLblPos = "low"
 
+    stop_overlaying_the_plot(bar)
     ws.add_chart(bar, f"{chart_col}26")
 
     # ---- deviation against the free band, in % of capacity ----
@@ -777,6 +797,7 @@ def main():
     free_band.legend.legendEntry = [LegendEntry(idx=0, delete=True)]
 
     free_band += dev_line
+    stop_overlaying_the_plot(free_band)
     ws.add_chart(free_band, f"{chart_col}45")
 
     ws.column_dimensions["A"].width = 8
