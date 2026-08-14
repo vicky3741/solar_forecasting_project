@@ -126,6 +126,42 @@ class DataPreprocessor:
             dataframe
         )
 
+        # DROP ALL-EMPTY COLUMNS, THEN DE-DUPLICATE NAMES.
+        #
+        # The 2026-08-13 Sirmour export gained three trailing columns -
+        # "Timestamp", "block_no", "source_file" - blank on every real
+        # reading. "Timestamp" and the real "TimeStamp" both normalise to
+        # `timestamp`, so the frame ended up with two columns of that
+        # name and pd.to_datetime received a DataFrame instead of a
+        # Series, failing with "cannot assemble with duplicate keys".
+        #
+        # That is a crash, not a wrong number, so it would have stopped
+        # the live run for that day rather than corrupting it quietly -
+        # but a vendor adding a blank column should not be able to stop
+        # a forecast at all.
+        #
+        # Empty columns go first so a blank duplicate can never win over
+        # the populated original, whichever order they appear in.
+        #
+        # Selected BY POSITION throughout. Once two columns share a name,
+        # dataframe[name] returns a DataFrame rather than a Series, and
+        # every ordinary test on it - including .isna().all() - raises
+        # "the truth value of a Series is ambiguous". Positional access
+        # is the only thing that behaves while the duplicate still
+        # exists.
+        keep = [
+            index for index in range(dataframe.shape[1])
+            if not dataframe.iloc[:, index].isna().all()
+        ]
+
+        if len(keep) < dataframe.shape[1]:
+            dataframe = dataframe.iloc[:, keep]
+
+        duplicated = dataframe.columns.duplicated()
+
+        if duplicated.any():
+            dataframe = dataframe.iloc[:, ~duplicated]
+
         timestamp_column = normalize_name(timestamp_column)
 
         # dayfirst matters only for the ambiguous dd-mm-yyyy files.
