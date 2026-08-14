@@ -361,6 +361,37 @@ it once. Open it and save, and the values are cached from then on.
 data, no penalty columns - when a bare scheduled-vs-actual sheet is all
 that is wanted.
 
+### How a block is priced (the mentor's SIRMOUR penalty logic)
+
+Sirmour settles on the **standard DSM calculation**, not the OSEPL
+payable/receivable settlement: only the *size* of the deviation is
+charged, so over-generation and under-generation cost the same.
+
+```text
+deviation_mw      = actual_meter_mw - scheduled_mw
+deviation_percent = deviation_mw / capacity_mw * 100     # capacity, not schedule
+deviation_kwh     = |deviation_mw| * 0.25 * 1000
+```
+
+Madhya Pradesh Solar bands, each charging its own slice of the deviation:
+0-10% free, 10-15% at Rs 0.50/kWh, 15-20% at Rs 0.75, above 20% at Rs 1.00.
+A block scheduled at 4.0 MW that generates 3.0 MW is -19.61% of the
+5.1 MW capacity and costs **Rs 75.94**.
+
+A block with no meter reading, or no schedule, is **Pending** — never a
+penalty of zero. A day is `Pending` / `Partially Calculated` /
+`Zero Penalty` / `Calculated` accordingly, and the report names the
+highest-penalty block.
+
+One implementation, `modules/evaluation/dsm_penalty.py`, read from
+`dsm.bands` in `config/settings.yaml`. Every report, experiment and
+pipeline goes through it, so no two of them can price a block
+differently. Check it against the mentor's own worked example any time:
+
+```bash
+python -m tests.test_dsm_penalty
+```
+
 Add a day's Enercast file as `data/enercast/Sirmour_<D>july_enercast.csv`
 (columns `Block, Time, Scheduled MW, ...`) and both reports pick it up
 automatically; leave it out and they simply omit the Enercast columns.
@@ -482,11 +513,13 @@ Known limitations, stated plainly:
   `data/windy/videos` folder only. Live runs and the daily reports do far
   better (6–7 clips a day from S3 since the EC2 capture went live). So the
   backtest is a no-vision floor; do not read it as the vision result.
-- **The backtest's penalty column is still the placeholder** (flat rate
-  beyond a 15% dead band). The real DSM slabs (0–10% free, then 0.50 /
-  0.75 / 1.00 Rs per kWh) are used by the daily penalty reports and by
-  `tests/test_block_bias_experiment.py` — those are the rupee numbers to
-  quote.
+- **The backtest's penalty column was a placeholder until 2026-08-14**
+  (flat rate beyond a 15% dead band, not rupees). It now uses the same
+  band table as everything else — `modules/evaluation/dsm_penalty.py`,
+  the mentor's SIRMOUR penalty logic — so `our_scheduling_penalty` and
+  `enercast_scheduling_penalty` are real rupees. **Any penalty figure
+  quoted from the backtest before that date is on the old basis and is
+  not comparable**; re-run `tests/test_backtest.py` before using one.
 - Plant tilt/azimuth are assumptions (latitude-tilt, south-facing) until
   site-confirmed values arrive.
 
@@ -522,8 +555,10 @@ legitimately come back saying "switch this off".
 
 ## Remaining work
 
-- Real DSM penalty formula in the backtest (the daily reports already use
-  the real slabs)
+- Confirm the Telangana plants' band table. Kasipet and Bhupalpally
+  currently inherit Madhya Pradesh Solar's slabs (`dsm.bands` in
+  `config/settings.yaml`); only Sirmour's has been confirmed by the
+  mentor. Their overlay can override `bands` without touching code.
 - Live end-to-end test of the scheduler across a full day
 - Backtester should read the S3/auto-captured clips, not just the old
   `data/windy/videos` folder, so vision is actually measured

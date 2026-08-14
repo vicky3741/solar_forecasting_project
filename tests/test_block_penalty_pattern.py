@@ -37,6 +37,7 @@ import numpy as np
 import pandas as pd
 
 from config.config import settings
+from modules.evaluation import dsm_penalty
 
 
 CAPACITY_MW = settings["plant"]["capacity_mw"]
@@ -44,23 +45,15 @@ SCHEDULE_DIR = Path(settings["outputs"]["schedules"])
 
 DEFAULT_DAYS = 5
 
-# The DSM slabs used in every penalty report this project has
-# built: 0-10% of capacity free, then 0.5 / 0.75 / 1.0 Rs per kWh.
-EDGE1 = CAPACITY_MW * 0.10
-EDGE2 = CAPACITY_MW * 0.15
-EDGE3 = CAPACITY_MW * 0.20
-BLOCK_ENERGY_FACTOR = 250      # 0.25 h x 1000 kW/MW
+# The DSM slabs, from modules/evaluation/dsm_penalty.py - the mentor's
+# band table, in one place, shared with the penalty report. EDGE1 is the
+# free dead band (10% of capacity) this analysis is built around.
+EDGE1, EDGE2, EDGE3 = [edge for _, edge, _ in dsm_penalty.band_edges_mw()[:3]]
+BLOCK_ENERGY_FACTOR = dsm_penalty.BLOCK_ENERGY_FACTOR
 
-
-def dsm_penalty_rs(deviation_mw):
-
-    dev = np.abs(deviation_mw)
-
-    return BLOCK_ENERGY_FACTOR * (
-        np.clip(np.minimum(dev, EDGE2) - EDGE1, 0, None) * 0.50
-        + np.clip(np.minimum(dev, EDGE3) - EDGE2, 0, None) * 0.75
-        + np.clip(dev - EDGE3, 0, None) * 1.00
-    )
+# Kept as a module-level name because tests/test_block_bias_experiment.py
+# imports it from here.
+dsm_penalty_rs = dsm_penalty.penalty_rs
 
 
 def load_days(n_days):
