@@ -59,3 +59,12 @@ data/plants/*/windy/screenshots/
 data/plants/*/windy/flow_cache/
 data/plants/*/weather/openmeteo_cache/
 data/plants/*/weather/ecmwf_direct/
+
+# ---- Raw plant data is not published (client data) ----
+# The files stay on disk and in S3; only this public repo leaves them out.
+# data/sample/ holds a synthetic example of the meter format.
+data/historical/
+data/enercast/
+data/processed/
+data/plants/*/historical/
+data/plants/*/processed/

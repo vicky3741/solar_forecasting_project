@@ -14,6 +14,53 @@ continuously maintains its own **Current Final Schedule**.
 Built by **Team 2** (Vikrant, Abhijit, Sandhyarani, Arpita) using only
 free / open-source tooling — no paid APIs.
 
+## Architecture
+
+```mermaid
+flowchart LR
+    subgraph Sources
+        M[Plant meter data<br/>15-min SCADA CSVs]
+        W[Windy cloud<br/>animation capture]
+        O[Open-Meteo<br/>weather forecast]
+    end
+
+    subgraph AWS
+        S3[(S3<br/>one bucket per plant)]
+        subgraph EC2["EC2 - one systemd scheduler per plant"]
+            SCH[Scheduler<br/>7-8 runs/day] --> P[Preprocessing<br/>kt history]
+            P --> CS[pvlib<br/>clear-sky physics]
+            P --> CH[Chronos<br/>kt forecast]
+            V[OpenCV frames<br/>+ Gemini vision] --> F[Hybrid blend<br/>in kt space]
+            CS --> F
+            CH --> F
+            F --> BB[Block bias<br/>correction]
+            BB --> ET[Effective-time<br/>freeze horizon]
+        end
+    end
+
+    M --> S3
+    W --> S3
+    S3 --> P
+    S3 --> V
+    O --> F
+    ET --> OUT[Current Final Schedule<br/>15-min blocks to 19:00]
+    OUT --> API[FastAPI + Chart.js<br/>dashboard]
+    OUT --> R[DSM penalty<br/>report]
+```
+
+## Sample output
+
+A day's Current Final Schedule against the metered output. Values are
+shown as % of plant capacity, and the shaded band is the ±10% deviation
+that carries no DSM penalty.
+
+![Forecast vs actual](docs/images/forecast_vs_actual.png)
+
+Raw plant meter data is not published in this repo. A 10-row sample of the
+meter file format is in
+[`data/sample/sample_meter_data.csv`](data/sample/sample_meter_data.csv).
+Regenerate the chart with `python docs/make_readme_chart.py <date>`.
+
 ---
 
 ## Three plants, one codebase, zero shared state
